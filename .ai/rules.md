@@ -34,3 +34,27 @@
 - Never edit an applied migration; add a new one.
 - Small commits, conventional commit messages.
 - Do not add features outside the current stage.
+
+## Git rules
+- Never use git push --force, git commit --no-verify, git reset --hard
+  on pushed commits, or rewrite history.
+- If a hook blocks a commit, fix the cause (usually update
+  .ai/journal.md and .ai/tasks/current.md). Never bypass the hook.
+- Never commit secrets, .env files, keys, tokens, or build artifacts.
+  If a secret was staged, unstage it and tell the user.
+- Commit format (Conventional Commits):
+  <type>(<scope>): <summary>
+
+  Journal: <YYYY-MM-DD> <step id>
+  Types: feat, fix, docs, chore, test, refactor, ci.
+- One logical change per commit. Small commits.
+- Push only to main for now (solo project). Do not create or delete
+  branches or tags without asking.
+- Do not change git config, remotes, or repository settings.
+
+## Scope limits
+- Standard library only unless a dependency is approved in an ADR.
+- No features beyond the current step in .ai/tasks/current.md.
+- Never delete files outside the current step's scope.
+- If something unexpected happens (failing CI, merge conflict,
+  unfamiliar files), stop and report instead of improvising.

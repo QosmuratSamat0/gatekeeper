@@ -52,3 +52,23 @@ Commit message ends with: "Journal: <date> <step id>".
 - Problems: what broke, how it was fixed
 - Next: the very next step
 - Commit: <hash or "pending">
+
+## Finishing a step (mandatory, in this order)
+1. Run checks: go test ./... -race, go vet ./..., golangci-lint run,
+   docker build (see .ai/commands.md). If anything fails, fix it and do
+   not continue.
+2. Update .ai per the Memory rule: journal, tasks/current.md,
+   changelog.md, architecture files, ADRs.
+3. git add only the needed files (no secrets, no binaries, no .env).
+   Review with git status and git diff --cached before committing.
+4. git commit using the commit format from .ai/rules.md.
+5. Record the commit hash in .ai/journal.md and .ai/changelog.md in a
+   separate commit: "docs(ai): record <step id> commit hash".
+6. git push to origin main. Verify with git status that the branch is
+   in sync.
+7. Final report: changed files, decisions, open questions, commit
+   hashes, CI run link. If push or CI fails, show the error and stop.
+
+Before the first push in a session, verify:
+git remote -v (origin is the gatekeeper repo) and
+git branch --show-current (main).
