@@ -14,4 +14,4 @@
 - Decisions: use github.com/go-chi/chi/v5 for route grouping and middleware (ADR 0002)
 - Problems: none
 - Next: execute step S0.2 (auth service skeleton)
-- Commit: pending
+- Commit: 86a6228
