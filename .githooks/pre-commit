@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e
+
+changed=$(git diff --cached --name-only)
+
+# Skip check if only .ai/ or docs changed
+if echo "$changed" | grep -qvE '^(\.ai/|docs/|README\.md)'; then
+  if ! echo "$changed" | grep -q '^\.ai/journal\.md$'; then
+    echo "ERROR: code changed but .ai/journal.md was not updated."
+    echo "Follow .ai/workflow.md (Memory rule)."
+    exit 1
+  fi
+  if ! echo "$changed" | grep -q '^\.ai/tasks/current\.md$'; then
+    echo "ERROR: .ai/tasks/current.md was not updated."
+    exit 1
+  fi
+fi
