@@ -22,4 +22,4 @@
 - Decisions: use chi router per ADR 0002; avoid deprecated middleware.RealIP
 - Problems: realip deprecated due to IP spoofing, excluded from router middleware; git .github file converted to directory
 - Next: S0.3 GHCR image push
-- Commit: pending
+- Commit: a7fa38b
