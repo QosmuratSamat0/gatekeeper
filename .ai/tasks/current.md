@@ -20,7 +20,7 @@
 - Done: устранение уязвимостей Trivy в CI/Docker: обновлены зависимости pgx (v5.7.2 -> v5.11.0), golang.org/x/crypto (v0.36.0 -> v0.57.0), golang.org/x/text (v0.23.0 -> v0.42.0), golang.org/x/sync (v0.12.0 -> v0.23.0), golang.org/x/sys (v0.31.0 -> v0.48.0). Локальный сканер Trivy в Docker-образе gatekeeper-auth:ci подтвердил 0 vulnerabilities (0 HIGH, 0 CRITICAL). Все unit-тесты, go vet, golangci-lint, Linux -race и PostgreSQL 16 интеграционные тесты прошли 100% успешно.
 - Next: ревью плана AUTH-03 со стороны Codex; после утверждения плана — реализация AUTH-03.
 - User authorized committing and pushing the accepted AUTH-01/AUTH-02 work and AUTH-03 brief on 2026-10-06. AUTH-03 implementation still awaits plan review.
-- Delivery: baseline 8a3b8d9 and record 3abdf64 published. User authorized committing and pushing the dependency security update on 2026-10-06; verify GitHub CI after publication.
+- Delivery: baseline 8a3b8d9 and record 3abdf64 published; dependency security update committed as d563dba. User authorized push on 2026-10-06; verify GitHub CI after publication.
 - Refresh rotation is AUTH-03; Access/Gateway remain later work.
 - Follow-up: make Swagger UI explicitly configurable (SWAGGER_ENABLED).
 

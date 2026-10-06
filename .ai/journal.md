@@ -233,3 +233,10 @@
 - Decisions: dependency update only; keep security scanner enabled; AUTH-03 implementation remains pending plan review.
 - Next: record commit hash, push origin/main and inspect CI status.
 - Commit: pending.
+
+### 2026-10-06 - TRIVY-DELIVERY-RECORD - Record dependency update hash
+- Done: recorded security update commit d563dba in changelog and task status.
+- Files: .ai/journal.md, .ai/changelog.md, .ai/tasks/current.md.
+- Decisions: no implementation changes in this record commit.
+- Next: push and verify remote hash and GitHub CI.
+- Commit: security update d563dba; record commit pending.
