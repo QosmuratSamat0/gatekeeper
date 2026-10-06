@@ -202,3 +202,10 @@
 - Verification: prior Codex tests/vet/gofmt passed; Gemini supplied successful Docker/lint/Linux race/PostgreSQL integration logs. Git index reviewed before commit; local .env and developer keys excluded.
 - Next: push and verify remote commit; review Gemini's AUTH-03 plan separately.
 - Commit: pending.
+
+### 2026-10-06 - AUTH-DELIVERY-RECORD - Record accepted baseline commit
+- Done: created baseline commit 8a3b8d9; removed trailing whitespace found by the staged diff check before publishing.
+- Files: .ai/journal.md, .ai/changelog.md, .ai/tasks/auth-01-review.md, services/auth/.env.example, services/auth/internal/repository/postgres/session.go.
+- Decisions: keep commit history intact; whitespace-only cleanup in a follow-up commit. No behavior changes.
+- Next: push both commits and verify origin/main and CI.
+- Commit: baseline 8a3b8d9; delivery record pending.

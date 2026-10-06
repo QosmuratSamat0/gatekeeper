@@ -100,7 +100,7 @@ func (r *SessionRepository) GetWithAccount(ctx context.Context, sessionID string
 	defer cancel()
 
 	query := `
-		SELECT 
+		SELECT
 			s.id, s.account_id, s.created_at, s.expires_at, s.revoked_at,
 			a.id, a.email, a.password_hash, a.status, a.email_verified, a.created_at, a.updated_at
 		FROM sessions s
@@ -156,7 +156,7 @@ func (r *SessionRepository) Revoke(ctx context.Context, sessionID string, accoun
 			WHERE id IN (SELECT id FROM target WHERE revoked_at IS NULL)
 			RETURNING id
 		)
-		SELECT 
+		SELECT
 			EXISTS(SELECT 1 FROM target) AS found,
 			COALESCE((SELECT revoked_at IS NOT NULL FROM target), false) AS was_revoked;
 	`

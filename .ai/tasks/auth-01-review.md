@@ -160,4 +160,3 @@ Gemini пишет код; Codex проверяет архитектуру и р�
   - В структуре `accountResponse` к полю `EmailVerified` добавлена аннотация `binding:"required"` (`EmailVerified bool json:"email_verified" binding:"required" example:"false"`).
   - Спецификации `swagger.yaml` и `swagger.json` перегенерированы через `swag init`.
   - Проверено, что `email_verified` теперь включен в список `required` схемы `http.accountResponse`.
-

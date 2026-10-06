@@ -19,6 +19,7 @@
 - Done: Codex prepared [AUTH-03](auth-03.md); user selected JSON refresh tokens for API/mobile clients. Browser cookie authentication is deferred.
 - Next: Gemini presents the AUTH-03 implementation plan (migration, transaction ports, lock order, HTTP contracts and tests) for Codex review before writing code.
 - User authorized committing and pushing the accepted AUTH-01/AUTH-02 work and AUTH-03 brief on 2026-10-06. AUTH-03 implementation still awaits plan review.
+- Delivery: baseline commit 8a3b8d9 created; record hash and whitespace cleanup before pushing to origin/main.
 - Refresh rotation is AUTH-03; Access/Gateway remain later work.
 - Follow-up: make Swagger UI explicitly configurable (SWAGGER_ENABLED).
 
