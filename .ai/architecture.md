@@ -1,5 +1,13 @@
 # Architecture
 
+## Current target (2026-10-04)
+See [Auth and Access](architecture/auth-access.md) for the current service
+boundaries and target layout. Auth comes first; Access follows with RBAC.
+See [Gateway](architecture/gateway.md) for edge routing, JWT validation,
+middleware boundaries and the target gateway layout.
+This supersedes the legacy layout and authz request flow below. Those sections
+describe the earlier plan; the existing Auth skeleton has not been migrated.
+
 ## Stack
 - Language: Go
 - HTTP: net/http + chi

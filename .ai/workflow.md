@@ -19,6 +19,7 @@ Every task follows these steps. Skipping a step is a failure.
 - New endpoint or trust boundary -> threat model note using
   .ai/prompts/threat-model.md.
 - Never invent cryptography, never put secrets in code or logs.
+  Never view, read, or edit .env files.
 
 ## Before finishing (definition of done)
 - [ ] Code builds, tests pass, lint passes (see .ai/commands.md)

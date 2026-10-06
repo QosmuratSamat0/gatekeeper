@@ -8,9 +8,19 @@
 - Interfaces are defined where they are used.
 - gofmt and golangci-lint must pass.
 
+## Code comments and explanations (user preference)
+- Write code comments in plain English: why a decision exists,
+  what it protects and what happens on failure. Avoid restating the code.
+- Explain unfamiliar terms when they matter. Do not comment every line.
+- Keep comments truthful and update them when behavior changes; exported GoDoc
+  starts with the declared identifier. Do not hand-edit generated comments.
+- For each reported change give purpose, location and verification result.
+- Examples and AUTH-01 corrections: .ai/tasks/auth-01-review.md.
+
 ## Security (hard rules)
 - Passwords: argon2id only. Never log passwords, tokens, or secrets.
 - No secrets in code or git. Use env vars and Kubernetes secrets.
+- Strictly forbidden to view, read, edit, or touch any local .env file (including .env, .env.*, or any secret environment file). The developer manages their own .env files locally. The AI must never inspect or modify them; only tracked templates like .env.example may be maintained.
 - Do not invent cryptography. Use vetted libraries.
 - Validate all input. Return generic errors on auth failures.
 - Use constant-time comparison for secrets and tokens.
@@ -41,7 +51,7 @@
 - If a hook blocks a commit, fix the cause (usually update
   .ai/journal.md and .ai/tasks/current.md). Never bypass the hook.
 - Never commit secrets, .env files, keys, tokens, or build artifacts.
-  If a secret was staged, unstage it and tell the user.
+  If a secret was staged, unstage it and tell the user. Never view, read, or edit .env files.
 - Commit format (Conventional Commits):
   <type>(<scope>): <summary>
 
