@@ -209,3 +209,27 @@
 - Decisions: keep commit history intact; whitespace-only cleanup in a follow-up commit. No behavior changes.
 - Next: push both commits and verify origin/main and CI.
 - Commit: baseline 8a3b8d9; delivery record pending.
+
+### 2026-10-06 16:40 - TRIVY-VULN-FIX - Upgraded vulnerable dependencies, clean Trivy scan and full re-verification
+- Done: updated vulnerable dependencies identified by Trivy vulnerability scanner in CI:
+  - `github.com/jackc/pgx/v5` upgraded from `v5.7.2` to `v5.11.0` (fixes all pgx HIGH/CRITICAL issues).
+  - `golang.org/x/crypto` upgraded from `v0.36.0` to `v0.57.0` (fixes all x/crypto HIGH/CRITICAL issues).
+  - `golang.org/x/text` upgraded from `v0.23.0` to `v0.42.0` (fixes all x/text HIGH/CRITICAL issues).
+  - `golang.org/x/sync` upgraded from `v0.12.0` to `v0.23.0`.
+  - `golang.org/x/sys` upgraded from `v0.31.0` to `v0.48.0`.
+  - Rebuilt Docker image `gatekeeper-auth:ci`.
+  - Executed Trivy scan using `aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 gatekeeper-auth:ci`: reported exactly **0 vulnerabilities** (0 HIGH, 0 CRITICAL), exit code 0.
+  - Re-verified all tests: `gofmt -l .` clean, `go vet ./...` clean, `golangci-lint` 0 issues (exit 0), unit tests 100% pass (exit 0), Linux race detector 0 races (exit 0), PostgreSQL 16 integration tests 6/6 pass (exit 0).
+- Files: services/auth/go.mod, services/auth/go.sum, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: keep Trivy security checks active in CI; upgrade dependencies to latest compatible secure releases.
+- Problems: none.
+- Next: Codex reviews AUTH-03 implementation plan.
+- Commit: not requested (held for user instructions).
+
+### 2026-10-06 - TRIVY-DELIVERY - Publish dependency security update
+- Done: user authorized commit/push of the reviewed dependency update; Codex independently reran internal tests, go vet and diff checks successfully.
+- Files: services/auth/go.mod, services/auth/go.sum, .ai/tasks/current.md, .ai/journal.md.
+- Verification: Gemini supplied a clean Trivy HIGH/CRITICAL scan with ignore-unfixed enabled; full GitHub CI must be confirmed after push.
+- Decisions: dependency update only; keep security scanner enabled; AUTH-03 implementation remains pending plan review.
+- Next: record commit hash, push origin/main and inspect CI status.
+- Commit: pending.
