@@ -47,7 +47,7 @@
   * Trivy scan на собранном образе — 0 уязвимостей (0 HIGH, 0 CRITICAL).
 - Done: Codex accepted AUTH-03; user confirmed manual API flow. Local signing keys are ignored and protected by AI rules.
 - Current task: [AUTH-04](auth-04.md) ? own session listing, targeted revocation and logout-all. Gemini presents a plan before implementation.
-- Delivery: user authorized AUTH-03 commit/push on 2026-10-07; delivery hash pending.
+- Delivery: user authorized AUTH-03 commit/push on 2026-10-07; implementation committed as f226159; record commit and push pending.
 
 ## Previous foundation task (pending)
 Stage 0, weeks 1-2: foundation.

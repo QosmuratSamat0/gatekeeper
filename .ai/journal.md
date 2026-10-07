@@ -286,3 +286,11 @@
 - Problems: none outstanding in reviewed AUTH-03 scope.
 - Next: record delivery hash, push main, verify remote and CI; Gemini presents AUTH-04 plan.
 - Commit: pending.
+
+### 2026-10-07 - AUTH-03-DELIVERY-RECORD - Record accepted implementation hash
+- Done: recorded AUTH-03 commit f226159 in changelog and current task.
+- Files: .ai/journal.md, .ai/changelog.md, .ai/tasks/current.md.
+- Decisions: no implementation changes in the record commit.
+- Problems: none.
+- Next: push both commits to origin/main, verify remote and CI; Gemini prepares AUTH-04 plan.
+- Commit: implementation f226159; record commit pending.
