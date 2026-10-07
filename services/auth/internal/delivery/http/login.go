@@ -24,10 +24,12 @@ type loginRequest struct {
 
 // loginResponse defines the successful authentication response.
 type loginResponse struct {
-	AccessToken string          `json:"access_token" binding:"required" example:"eyJhbGciOiJFZERTQSI..."`
-	TokenType   string          `json:"token_type" binding:"required" example:"Bearer"`
-	ExpiresIn   int64           `json:"expires_in" binding:"required" example:"600"`
-	Account     accountResponse `json:"account" binding:"required"`
+	AccessToken      string          `json:"access_token" binding:"required" example:"eyJhbGciOiJFZERTQSI..."`
+	TokenType        string          `json:"token_type" binding:"required" example:"Bearer"`
+	ExpiresIn        int64           `json:"expires_in" binding:"required" example:"600"`
+	RefreshToken     string          `json:"refresh_token" binding:"required" example:"u4W78Q9jKl_..."`
+	RefreshExpiresIn int64           `json:"refresh_expires_in" binding:"required" example:"2592000"`
+	Account          accountResponse `json:"account" binding:"required"`
 }
 
 // Login handles user authentication and access token issuance.
@@ -108,13 +110,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure access token is never cached by downstream proxies or browsers
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	resp := loginResponse{
-		AccessToken: out.AccessToken,
-		TokenType:   out.TokenType,
-		ExpiresIn:   out.ExpiresIn,
+		AccessToken:      out.AccessToken,
+		TokenType:        out.TokenType,
+		ExpiresIn:        out.ExpiresIn,
+		RefreshToken:     out.RefreshToken,
+		RefreshExpiresIn: out.RefreshExpiresIn,
 		Account: accountResponse{
 			ID:            out.Account.ID,
 			Email:         out.Account.Email,

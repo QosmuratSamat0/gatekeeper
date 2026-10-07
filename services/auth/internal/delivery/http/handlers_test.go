@@ -27,7 +27,7 @@ func (m *mockReadiness) Ping(ctx context.Context) error {
 
 func setupTestRouter(readiness deliveryhttp.ReadinessChecker) http.Handler {
 	discardLogger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	h := deliveryhttp.NewHandler(discardLogger, readiness, nil, nil, nil, nil, nil, nil, nil)
+	h := deliveryhttp.NewHandler(discardLogger, readiness, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return h.Routes()
 }
 

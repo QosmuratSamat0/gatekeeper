@@ -113,9 +113,12 @@ type errorDetail struct {
 	RequestID string `json:"request_id"`
 }
 
-// RateLimitLoginMiddleware creates an HTTP middleware applying the 10 attempts/minute IP rate limit.
+// RateLimitMiddleware creates an HTTP middleware applying the bounded per-IP rate limit.
 // It extracts the client IP strictly from r.RemoteAddr without trusting client-controlled headers.
-func RateLimitLoginMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *IPRateLimiter, message string) func(http.Handler) http.Handler {
+	if message == "" {
+		message = "Too many requests. Please try again later."
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract client host from RemoteAddr (stripping port)
@@ -133,7 +136,7 @@ func RateLimitLoginMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Ha
 				_ = json.NewEncoder(w).Encode(errorEnvelope{
 					Error: errorDetail{
 						Code:      "rate_limited",
-						Message:   "Too many login attempts. Please try again later.",
+						Message:   message,
 						RequestID: reqID,
 					},
 				})
@@ -143,4 +146,9 @@ func RateLimitLoginMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Ha
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RateLimitLoginMiddleware creates an HTTP middleware applying the login attempts/minute IP rate limit.
+func RateLimitLoginMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+	return RateLimitMiddleware(limiter, "Too many login attempts. Please try again later.")
 }

@@ -19,7 +19,7 @@ Every task follows these steps. Skipping a step is a failure.
 - New endpoint or trust boundary -> threat model note using
   .ai/prompts/threat-model.md.
 - Never invent cryptography, never put secrets in code or logs.
-  Never view, read, or edit .env files.
+  Never view, read, or edit .env files or local signing keys (/services/auth/keys/).
 
 ## Before finishing (definition of done)
 - [ ] Code builds, tests pass, lint passes (see .ai/commands.md)
@@ -60,7 +60,7 @@ Commit message ends with: "Journal: <date> <step id>".
    not continue.
 2. Update .ai per the Memory rule: journal, tasks/current.md,
    changelog.md, architecture files, ADRs.
-3. git add only the needed files (no secrets, no binaries, no .env).
+3. git add only the needed files (no secrets, no binaries, no .env, no keys).
    Review with git status and git diff --cached before committing.
 4. git commit using the commit format from .ai/rules.md.
 5. Record the commit hash in .ai/journal.md and .ai/changelog.md in a

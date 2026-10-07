@@ -16,12 +16,14 @@ type LoginInput struct {
 	Password string
 }
 
-// LoginOutput carries the issued access token and account information.
+// LoginOutput carries the issued access token, refresh token, and account information.
 type LoginOutput struct {
-	AccessToken string
-	TokenType   string
-	ExpiresIn   int64
-	Account     domain.Account
+	AccessToken      string
+	TokenType        string
+	ExpiresIn        int64
+	RefreshToken     string
+	RefreshExpiresIn int64
+	Account          domain.Account
 }
 
 // LoginUsecase coordinates credential verification and access token issuance.
@@ -30,10 +32,12 @@ type LoginUsecase struct {
 	sessionRepo SessionRepository
 	verifier    PasswordVerifier
 	tokenSigner TokenSigner
+	refreshGen  RefreshTokenGenerator
 	uuidGen     UUIDGenerator
 	clock       Clock
 	dummyHash   string
 	tokenTTL    time.Duration
+	sessionTTL  time.Duration
 }
 
 // NewLoginUsecase constructs a LoginUsecase with required ports and configurations.
@@ -42,8 +46,10 @@ func NewLoginUsecase(
 	sessionRepo SessionRepository,
 	verifier PasswordVerifier,
 	tokenSigner TokenSigner,
+	refreshGen RefreshTokenGenerator,
 	dummyHash string,
 	tokenTTL time.Duration,
+	sessionTTL time.Duration,
 	uuidGen UUIDGenerator,
 	clock Clock,
 ) (*LoginUsecase, error) {
@@ -59,11 +65,17 @@ func NewLoginUsecase(
 	if tokenSigner == nil {
 		return nil, errors.New("tokenSigner is required")
 	}
+	if refreshGen == nil {
+		return nil, errors.New("refreshGen is required")
+	}
 	if dummyHash == "" {
 		return nil, errors.New("dummyHash is required")
 	}
 	if tokenTTL <= 0 {
 		tokenTTL = 10 * time.Minute
+	}
+	if sessionTTL <= 0 {
+		sessionTTL = 720 * time.Hour
 	}
 	if uuidGen == nil {
 		uuidGen = CryptoUUIDGenerator{}
@@ -77,10 +89,12 @@ func NewLoginUsecase(
 		sessionRepo: sessionRepo,
 		verifier:    verifier,
 		tokenSigner: tokenSigner,
+		refreshGen:  refreshGen,
 		uuidGen:     uuidGen,
 		clock:       clock,
 		dummyHash:   dummyHash,
 		tokenTTL:    tokenTTL,
+		sessionTTL:  sessionTTL,
 	}, nil
 }
 
@@ -153,35 +167,62 @@ func (uc *LoginUsecase) Execute(ctx context.Context, input LoginInput) (LoginOut
 		return LoginOutput{}, domain.ErrInvalidCredentials
 	}
 
-	// Password verified. Generate session ID and sign access JWT before committing session to database.
+	// Password verified. Generate session ID and refresh token.
 	sessionID, err := uc.uuidGen.Generate()
 	if err != nil {
 		return LoginOutput{}, fmt.Errorf("generating session id: %w", err)
 	}
 
-	tokenStr, expiresAt, expiresIn, err := uc.tokenSigner.SignAccessToken(acc.ID, sessionID)
+	refreshTokenID, err := uc.uuidGen.Generate()
+	if err != nil {
+		return LoginOutput{}, fmt.Errorf("generating refresh token id: %w", err)
+	}
+
+	rawRefreshToken, tokenHash, err := uc.refreshGen.Generate()
+	if err != nil {
+		return LoginOutput{}, fmt.Errorf("generating refresh token: %w", err)
+	}
+
+	now := uc.clock.Now().UTC()
+	sessionExpiresAt := now.Add(uc.sessionTTL)
+
+	tokenStr, _, expiresIn, err := uc.tokenSigner.SignAccessTokenWithExpiry(acc.ID, sessionID, sessionExpiresAt)
 	if err != nil {
 		return LoginOutput{}, fmt.Errorf("signing access token: %w", err)
 	}
 
-	// Ensure session expiration matches the exact expiration claim used in the JWT.
 	session := domain.Session{
 		ID:        sessionID,
 		AccountID: acc.ID,
-		CreatedAt: expiresAt.Add(-time.Duration(expiresIn) * time.Second),
-		ExpiresAt: expiresAt,
+		CreatedAt: now,
+		ExpiresAt: sessionExpiresAt,
 	}
 
-	// Persist session atomically while checking that account remains active and credentials unchanged.
-	if err := uc.sessionRepo.CreateAtomic(ctx, session, acc.PasswordHash); err != nil {
+	initialToken := domain.RefreshToken{
+		ID:        refreshTokenID,
+		SessionID: sessionID,
+		TokenHash: tokenHash,
+		CreatedAt: now,
+		ExpiresAt: sessionExpiresAt,
+	}
+
+	// Persist session and initial refresh token atomically while checking active account and unchanged hash.
+	if err := uc.sessionRepo.CreateWithInitialRefresh(ctx, session, acc.PasswordHash, initialToken); err != nil {
 		return LoginOutput{}, fmt.Errorf("persisting session: %w", err)
 	}
 
+	refreshExpiresIn := int64(sessionExpiresAt.Sub(now).Seconds())
+	if refreshExpiresIn < 0 {
+		refreshExpiresIn = 0
+	}
+
 	return LoginOutput{
-		AccessToken: tokenStr,
-		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
-		Account:     acc,
+		AccessToken:      tokenStr,
+		TokenType:        "Bearer",
+		ExpiresIn:        expiresIn,
+		RefreshToken:     rawRefreshToken,
+		RefreshExpiresIn: refreshExpiresIn,
+		Account:          acc,
 	}, nil
 }
 

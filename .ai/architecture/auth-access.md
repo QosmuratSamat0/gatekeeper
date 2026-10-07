@@ -38,8 +38,9 @@ all I/O and enforce timeouts. Split files when useful, not as empty scaffolding.
 ## Auth
 - Current implementation uses generated api/{docs.go,swagger.json,swagger.yaml}
   from Swag annotations (Swagger 2.0), superseding the layout's openapi.yaml.
-- Next slice: [AUTH-02](../tasks/auth-02.md), login/access JWT/session/logout/JWKS.
-  Refresh tokens are deliberately not issued until AUTH-03 implements rotation.
+- Implemented and accepted: AUTH-01 registration, AUTH-02 login/access JWT/session/logout/JWKS, and AUTH-03 JSON refresh rotation/reuse detection.
+- Next brief: [AUTH-04](../tasks/auth-04.md), own session listing, targeted revocation and logout-all; implementation pending plan approval.
+- AUTH-03 stores only refresh digests, retains consumed records, and uses a stable session family with an absolute expiry.
 - Domain: account, session, domain errors.
 - Usecases: register, login, refresh, logout, password reset.
 - Storage: accounts, sessions, password reset and email verification tokens.

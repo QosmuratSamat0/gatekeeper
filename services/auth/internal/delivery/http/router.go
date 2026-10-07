@@ -33,6 +33,12 @@ type CurrentAccountService interface {
 // LogoutService defines the session revocation usecase contract.
 type LogoutService interface {
 	Execute(ctx context.Context, accountID, sessionID string) error
+	ExecuteByRefreshToken(ctx context.Context, rawRefreshToken string) error
+}
+
+// RefreshService defines the token rotation usecase contract.
+type RefreshService interface {
+	Execute(ctx context.Context, input usecase.RefreshInput) (usecase.RefreshOutput, error)
 }
 
 // Handler holds HTTP dependencies and endpoints.
@@ -41,11 +47,14 @@ type Handler struct {
 	readiness        ReadinessChecker
 	registerUC       RegistrationService
 	loginUC          LoginService
+	refreshUC        RefreshService
 	currentAccountUC CurrentAccountService
 	logoutUC         LogoutService
 	tokenVerifier    authmiddleware.TokenVerifier
 	jwksProvider     JWKSProvider
 	rateLimiter      *authmiddleware.IPRateLimiter
+	refreshLimiter   *authmiddleware.IPRateLimiter
+	logoutLimiter    *authmiddleware.IPRateLimiter
 }
 
 // NewHandler creates a new Handler instance with all injected usecases and platform adapters.
@@ -54,22 +63,28 @@ func NewHandler(
 	readiness ReadinessChecker,
 	registerUC RegistrationService,
 	loginUC LoginService,
+	refreshUC RefreshService,
 	currentAccountUC CurrentAccountService,
 	logoutUC LogoutService,
 	tokenVerifier authmiddleware.TokenVerifier,
 	jwksProvider JWKSProvider,
 	rateLimiter *authmiddleware.IPRateLimiter,
+	refreshLimiter *authmiddleware.IPRateLimiter,
+	logoutLimiter *authmiddleware.IPRateLimiter,
 ) *Handler {
 	return &Handler{
 		logger:           logger,
 		readiness:        readiness,
 		registerUC:       registerUC,
 		loginUC:          loginUC,
+		refreshUC:        refreshUC,
 		currentAccountUC: currentAccountUC,
 		logoutUC:         logoutUC,
 		tokenVerifier:    tokenVerifier,
 		jwksProvider:     jwksProvider,
 		rateLimiter:      rateLimiter,
+		refreshLimiter:   refreshLimiter,
+		logoutLimiter:    logoutLimiter,
 	}
 }
 
@@ -118,6 +133,25 @@ func (h *Handler) Routes() http.Handler {
 		}
 	}
 
+	// Public refresh endpoint with per-IP rate limiting applied before DB lookup
+	if h.refreshUC != nil {
+		if h.refreshLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.refreshLimiter, "Too many refresh attempts. Please try again later.")).Post("/v1/auth/refresh", h.Refresh)
+		} else {
+			r.Post("/v1/auth/refresh", h.Refresh)
+		}
+	}
+
+	// Dual-mode logout endpoint (Bearer or refresh_token body) with per-IP rate limiting
+	// Placed outside unconditional BearerAuth middleware so refresh-mode logout is supported after access token expiry.
+	if h.logoutUC != nil {
+		if h.logoutLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.logoutLimiter, "Too many logout attempts. Please try again later.")).Post("/v1/auth/logout", h.Logout)
+		} else {
+			r.Post("/v1/auth/logout", h.Logout)
+		}
+	}
+
 	// Protected endpoints (require verified Bearer token)
 	if h.tokenVerifier != nil {
 		r.Group(func(protected chi.Router) {
@@ -125,10 +159,6 @@ func (h *Handler) Routes() http.Handler {
 
 			if h.currentAccountUC != nil {
 				protected.Get("/v1/auth/me", h.Me)
-			}
-
-			if h.logoutUC != nil {
-				protected.Post("/v1/auth/logout", h.Logout)
 			}
 		})
 	}

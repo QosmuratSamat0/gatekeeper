@@ -28,6 +28,9 @@ type Config struct {
 	// Rate Limiting Configuration
 	LoginRateLimitAttempts int
 	LoginRateLimitWindow   time.Duration
+
+	// Refresh Token and Session Family Configuration
+	RefreshSessionTTL time.Duration
 }
 
 // Load reads and validates configuration from environment variables.
@@ -132,6 +135,15 @@ func Load() (Config, error) {
 		rateLimitWindow = d
 	}
 
+	refreshSessionTTL := 720 * time.Hour
+	if val := os.Getenv("REFRESH_SESSION_TTL"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 24*time.Hour || d > 720*time.Hour {
+			return Config{}, fmt.Errorf("REFRESH_SESSION_TTL must be a duration between 24h and 720h, got %q", val)
+		}
+		refreshSessionTTL = d
+	}
+
 	return Config{
 		HTTPAddr:                addr,
 		DatabaseURL:             dbURL,
@@ -147,5 +159,6 @@ func Load() (Config, error) {
 		AccessTokenTTL:          tokenTTL,
 		LoginRateLimitAttempts:  rateLimitAttempts,
 		LoginRateLimitWindow:    rateLimitWindow,
+		RefreshSessionTTL:       refreshSessionTTL,
 	}, nil
 }

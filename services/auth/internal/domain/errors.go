@@ -41,4 +41,11 @@ var (
 
 	// ErrInternalCredentialFailure indicates that a stored password hash was malformed or corrupted.
 	ErrInternalCredentialFailure = errors.New("internal credential storage failure")
+
+	// ErrInvalidRefreshToken indicates that the refresh token format is malformed or invalid.
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+
+	// ErrCompromisedSessionReplay indicates that a previously consumed refresh token was presented,
+	// signalling token theft or replay. The entire session family is revoked and committed.
+	ErrCompromisedSessionReplay = errors.New("compromised session replay detected")
 )

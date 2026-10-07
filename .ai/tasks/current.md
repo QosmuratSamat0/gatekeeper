@@ -15,14 +15,39 @@
 - Done: integrated Swagger UI using ready-made library github.com/swaggo/http-swagger/v2 mounted at /swagger/* (with /swagger redirect) without custom HTML pages; generated api/docs.go via swag; updated ADR 0004, CI check, README, and unit tests.
 - Done: [AUTH-02](auth-02.md) — login, access JWT, sessions, /me, logout, public JWKS:
   все замечания ревью Codex закрыты, полный набор проверок (gofmt, go vet, golangci-lint, unit tests, Docker build, Linux -race, PostgreSQL 16 integration tests) успешно пройден и подтверждён. AUTH-02 полностью принят.
-- Current task: **AUTH-03** — refresh-токены, их ротация, обнаружение повторного использования (reuse detection) и аннулирование семейства токенов при компрометации.
-- Done: Codex prepared [AUTH-03](auth-03.md); user selected JSON refresh tokens for API/mobile clients. Browser cookie authentication is deferred.
-- Done: устранение уязвимостей Trivy в CI/Docker: обновлены зависимости pgx (v5.7.2 -> v5.11.0), golang.org/x/crypto (v0.36.0 -> v0.57.0), golang.org/x/text (v0.23.0 -> v0.42.0), golang.org/x/sync (v0.12.0 -> v0.23.0), golang.org/x/sys (v0.31.0 -> v0.48.0). Локальный сканер Trivy в Docker-образе gatekeeper-auth:ci подтвердил 0 vulnerabilities (0 HIGH, 0 CRITICAL). Все unit-тесты, go vet, golangci-lint, Linux -race и PostgreSQL 16 интеграционные тесты прошли 100% успешно.
-- Next: ревью плана AUTH-03 со стороны Codex; после утверждения плана — реализация AUTH-03.
-- User authorized committing and pushing the accepted AUTH-01/AUTH-02 work and AUTH-03 brief on 2026-10-06. AUTH-03 implementation still awaits plan review.
-- Delivery: baseline 8a3b8d9 and record 3abdf64 published; dependency security update committed as d563dba. User authorized push on 2026-10-06; verify GitHub CI after publication.
-- Refresh rotation is AUTH-03; Access/Gateway remain later work.
-- Follow-up: make Swagger UI explicitly configurable (SWAGGER_ENABLED).
+- Done and accepted: **AUTH-03** — refresh-токены, их ротация, обнаружение повторного использования (reuse detection) и аннулирование семейства токенов при компрометации.
+- Done: Codex prepared [AUTH-03](auth-03.md); user selected JSON refresh tokens for API/mobile clients.
+- Done: утверждён план с двумя обязательными уточнениями (убрать сырой refresh из результата репозитория; проверять актуальное время после ожидания блокировок; зафиксирован исход гонки refresh vs logout). Принят ADR 0006.
+- Done: реализована миграция `000003_create_refresh_tokens` (с проверками octet_length=32, временных порядков, частичным уникальным индексом).
+- Done: реализованы токены (`ValidateAndHashRefreshToken` со строгим canonical RFC 4648 декодированием, `GenerateRefreshToken`, `SignAccessTokenWithExpiry` с отсечением и проверкой exp <= iat).
+- Done: реализованы атомарные операции в репозитории `session.go` с каноническим порядком блокировок `accounts (SHARE) -> sessions (UPDATE) -> refresh_tokens (UPDATE)`, повторной проверкой состояния под блокировками и фиксацией компрометации в БД при reuse.
+- Done: реализованы use cases (`LoginUsecase` с начальным refresh, `RefreshUsecase`, `LogoutUsecase` с `ExecuteByRefreshToken`).
+- Done: реализованы HTTP-хэндлеры (`POST /v1/auth/refresh`, обновлён `POST /v1/auth/login`, двухрежимный `POST /v1/auth/logout` с отклонением 400 при неоднозначных учётных данных).
+- Done: настроены независимые rate limiters (10/min/IP) для login, refresh и logout.
+- Done: сгенерирована документация Swagger 2.0 (`swag init`) с DTO и аннотациями.
+- Done: устранены 5 замечаний ревью Codex по AUTH-03:
+  1. Usecase отвязан от конкретного адаптера: в `usecase/ports.go` введены consumer-owned порты `RefreshTokenGenerator`, `RefreshTokenValidator`, `RefreshTokenManager`, удалены импорты `platform/token` из `login.go`, `refresh.go`, `logout.go`, реализация подключена в `app/wiring.go`.
+  2. Добавлена повторная проверка wall-clock времени непосредственно перед изменениями в `session.go` (предотвращает нарушение constraint `chk_refresh_tokens_expiry_order` и ошибку 500, возвращает generic 401 с rollback; также generic 401 возвращается при `domain.ErrSessionExpired` из signer).
+  3. В `logout.go` исправлена проверка взаимоисключающих режимов: проверяется строгое наличие заголовка (`len(authHeaders) > 0`) независимо от содержимого (включая пустой заголовок + тело refresh), возвращается 400 `invalid_request`.
+  4. Коды ошибок 400 в refresh и refresh-logout приведены к единому `invalid_request` (вместо `bad_request`); в тестах проверяется поле `code` в теле ответа.
+  5. Тесты расширены и усилены:
+     * Тест гонки `TestPostgres_Refresh_ConcurrentSameTokenRace` строго требует ровно 1 успех (`200 OK`) и ровно `numWorkers - 1` отказов (`401 Unauthorized`).
+     * `TestPostgres_Refresh_SignerExpLeqIatRollback` детерминированно проверяет настоящий signer `TokenService.SignAccessTokenWithExpiry` при `exp <= iat` с использованием фиксированных часов signer'а при валидной сессии в БД; подтверждён вызов реального callback signer'а, возврат `domain.ErrSessionExpired` и откат мутаций в PostgreSQL.
+     * `TestPostgres_Logout_DualModes` проверяет logout через refresh-токен после истечения access-токена, а также отклонение пустого `Authorization` с телом.
+     * `TestPostgres_Refresh_SuccessorInsertFailureRollback` проверяет откат при ошибке вставки преемника и сохранение пригодности старого refresh-токена для последующего успешного refresh (200 OK).
+  6. Добавлено правило `/services/auth/keys/` в корневой `.gitignore` с английским комментарием о недопустимости коммита локальных ключей подписи; работа правила подтверждена через `git check-ignore -v` (без открытия и вывода содержимого файлов ключей); в `.ai/rules.md` и `.ai/workflow.md` внесены явные запреты на просмотр, чтение, изменение и коммит локальных ключей подписи и каталога `/services/auth/keys/`.
+- Done: повторно пройден и подтверждён полный цикл верификации:
+  * Unit-тесты (`services/auth/internal/...`) — 100% pass.
+  * `gofmt -l .` — 0 файлов (100% форматирование).
+  * `go vet ./...` — 0 предупреждений.
+  * `golangci-lint` (Docker `golangci/golangci-lint:latest`) — `0 issues`.
+  * Linux race detector (`-race` в Docker `golang:1.26-alpine`) — 100% pass, 0 races.
+  * PostgreSQL 16 интеграционные тесты — все 15 тестов успешно прошли на изолированной БД.
+  * Docker build `gatekeeper-auth:ci` — успешно.
+  * Trivy scan на собранном образе — 0 уязвимостей (0 HIGH, 0 CRITICAL).
+- Done: Codex accepted AUTH-03; user confirmed manual API flow. Local signing keys are ignored and protected by AI rules.
+- Current task: [AUTH-04](auth-04.md) ? own session listing, targeted revocation and logout-all. Gemini presents a plan before implementation.
+- Delivery: user authorized AUTH-03 commit/push on 2026-10-07; delivery hash pending.
 
 ## Previous foundation task (pending)
 Stage 0, weeks 1-2: foundation.

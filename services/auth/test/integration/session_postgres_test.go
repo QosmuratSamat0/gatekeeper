@@ -64,16 +64,21 @@ func TestPostgres_LoginAndSessionEndToEnd(t *testing.T) {
 		t.Fatalf("failed to create token service: %v", err)
 	}
 
+	refreshMgr := token.NewRefreshTokenManager()
 	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
-	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, dummyHash, 10*time.Minute, nil, nil)
+	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshMgr, dummyHash, 10*time.Minute, 720*time.Hour, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create login usecase: %v", err)
 	}
+	refreshUC, err := usecase.NewRefreshUsecase(sessionRepo, tokenSvc, refreshMgr, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create refresh usecase: %v", err)
+	}
 	meUC, _ := usecase.NewCurrentAccountUsecase(sessionRepo, nil)
-	logoutUC, _ := usecase.NewLogoutUsecase(sessionRepo)
+	logoutUC, _ := usecase.NewLogoutUsecase(sessionRepo, refreshMgr)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := delivery.NewHandler(logger, pool, registerUC, loginUC, meUC, logoutUC, &testTokenAdapter{tokenSvc: tokenSvc}, tokenSvc, nil)
+	handler := delivery.NewHandler(logger, pool, registerUC, loginUC, refreshUC, meUC, logoutUC, &testTokenAdapter{tokenSvc: tokenSvc}, tokenSvc, nil, nil, nil)
 	router := handler.Routes()
 
 	// 1. Register new account
@@ -97,8 +102,10 @@ func TestPostgres_LoginAndSessionEndToEnd(t *testing.T) {
 	}
 
 	var loginResp struct {
-		AccessToken string `json:"access_token"`
-		Account     struct {
+		AccessToken      string `json:"access_token"`
+		RefreshToken     string `json:"refresh_token"`
+		RefreshExpiresIn int64  `json:"refresh_expires_in"`
+		Account          struct {
 			ID    string `json:"id"`
 			Email string `json:"email"`
 		} `json:"account"`
@@ -109,8 +116,14 @@ func TestPostgres_LoginAndSessionEndToEnd(t *testing.T) {
 	if loginResp.AccessToken == "" {
 		t.Fatal("expected non-empty access token")
 	}
+	if loginResp.RefreshToken == "" {
+		t.Fatal("expected non-empty refresh token")
+	}
+	if loginResp.RefreshExpiresIn <= 0 {
+		t.Fatalf("expected positive refresh_expires_in, got %d", loginResp.RefreshExpiresIn)
+	}
 
-	// Verify session was created in the database
+	// Verify session and initial refresh token were created in the database
 	var sessCount int
 	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM sessions WHERE account_id = $1 AND revoked_at IS NULL", loginResp.Account.ID).Scan(&sessCount)
 	if err != nil {
@@ -118,6 +131,15 @@ func TestPostgres_LoginAndSessionEndToEnd(t *testing.T) {
 	}
 	if sessCount != 1 {
 		t.Errorf("expected 1 active session in DB, got %d", sessCount)
+	}
+
+	var refreshCount int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM refresh_tokens rt JOIN sessions s ON s.id = rt.session_id WHERE s.account_id = $1 AND rt.consumed_at IS NULL", loginResp.Account.ID).Scan(&refreshCount)
+	if err != nil {
+		t.Fatalf("failed to query refresh_tokens table: %v", err)
+	}
+	if refreshCount != 1 {
+		t.Errorf("expected 1 active unconsumed refresh token in DB, got %d", refreshCount)
 	}
 
 	// 3. Call /v1/auth/me with Bearer token -> 200 OK

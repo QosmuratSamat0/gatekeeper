@@ -20,7 +20,7 @@
 ## Security (hard rules)
 - Passwords: argon2id only. Never log passwords, tokens, or secrets.
 - No secrets in code or git. Use env vars and Kubernetes secrets.
-- Strictly forbidden to view, read, edit, or touch any local .env file (including .env, .env.*, or any secret environment file). The developer manages their own .env files locally. The AI must never inspect or modify them; only tracked templates like .env.example may be maintained.
+- Strictly forbidden to view, read, edit, or touch any local .env file (including .env, .env.*, or any secret environment file) or local signing keys / private key files (including /services/auth/keys/, *.pem, *.key). The developer manages their own .env files and local keys. The AI must never inspect, open, print, or modify them; only tracked templates like .env.example may be maintained.
 - Do not invent cryptography. Use vetted libraries.
 - Validate all input. Return generic errors on auth failures.
 - Use constant-time comparison for secrets and tokens.
@@ -51,7 +51,7 @@
 - If a hook blocks a commit, fix the cause (usually update
   .ai/journal.md and .ai/tasks/current.md). Never bypass the hook.
 - Never commit secrets, .env files, keys, tokens, or build artifacts.
-  If a secret was staged, unstage it and tell the user. Never view, read, or edit .env files.
+  If a secret was staged, unstage it and tell the user. Never view, read, or edit .env files or local signing keys (/services/auth/keys/).
 - Commit format (Conventional Commits):
   <type>(<scope>): <summary>
 

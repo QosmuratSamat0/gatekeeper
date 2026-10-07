@@ -84,6 +84,12 @@ definitions:
       expires_in:
         example: 600
         type: integer
+      refresh_expires_in:
+        example: 2592000
+        type: integer
+      refresh_token:
+        example: u4W78Q9jKl_...
+        type: string
       token_type:
         example: Bearer
         type: string
@@ -91,12 +97,52 @@ definitions:
     - access_token
     - account
     - expires_in
+    - refresh_expires_in
+    - refresh_token
     - token_type
+    type: object
+  http.logoutRefreshRequest:
+    properties:
+      refresh_token:
+        example: u4W78Q9jKl_...
+        type: string
     type: object
   http.meResponseEnvelope:
     properties:
       account:
         $ref: '#/definitions/http.accountResponse'
+    type: object
+  http.refreshRequest:
+    properties:
+      refresh_token:
+        example: u4W78Q9jKl_...
+        type: string
+    required:
+    - refresh_token
+    type: object
+  http.refreshResponse:
+    properties:
+      access_token:
+        example: eyJhbGciOiJFZERTQSI...
+        type: string
+      expires_in:
+        example: 600
+        type: integer
+      refresh_expires_in:
+        example: 2592000
+        type: integer
+      refresh_token:
+        example: x8K23P9mLz_...
+        type: string
+      token_type:
+        example: Bearer
+        type: string
+    required:
+    - access_token
+    - expires_in
+    - refresh_expires_in
+    - refresh_token
+    - token_type
     type: object
   http.registerRequest:
     properties:
@@ -251,14 +297,38 @@ paths:
       - auth
   /v1/auth/logout:
     post:
-      description: 'Revokes the active session associated with the bearer access token.
-        Idempotent: repeating logout with an unexpired token returns 204 if already
-        revoked.'
+      consumes:
+      - application/json
+      description: Revokes the active session via either Authorization Bearer header
+        or application/json refresh_token body. Providing both credentials simultaneously
+        returns 400.
+      parameters:
+      - description: Refresh token body (used when logging out without access token)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/http.logoutRefreshRequest'
       responses:
         "204":
           description: Session successfully revoked
+        "400":
+          description: Ambiguous credentials (both Bearer and body) or malformed JSON
+          schema:
+            $ref: '#/definitions/http.errorResponse'
         "401":
-          description: Unauthorized or session does not exist
+          description: Unauthorized or invalid/expired credentials
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Payload too large (> 4 KiB)
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "415":
+          description: Unsupported media type
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "429":
+          description: Rate limit exceeded
           schema:
             $ref: '#/definitions/http.errorResponse'
         "500":
@@ -269,8 +339,6 @@ paths:
           description: Database unavailable
           schema:
             $ref: '#/definitions/http.errorResponse'
-      security:
-      - BearerAuth: []
       summary: Log out current session
       tags:
       - auth
@@ -300,6 +368,58 @@ paths:
       security:
       - BearerAuth: []
       summary: Get current user profile
+      tags:
+      - auth
+  /v1/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Rotates a valid unconsumed refresh token, invalidates the old token,
+        and issues a new access JWT and successor refresh token. If a previously consumed
+        token is replayed, the session family is immediately revoked.
+      parameters:
+      - description: Refresh token payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Rotation successful
+          schema:
+            $ref: '#/definitions/http.refreshResponse'
+        "400":
+          description: Malformed JSON or missing refresh_token
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "401":
+          description: Invalid, expired, revoked, or replayed credentials
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Payload too large (> 4 KiB)
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "415":
+          description: Unsupported media type
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Rotate refresh token and issue new access JWT
       tags:
       - auth
   /v1/auth/register:

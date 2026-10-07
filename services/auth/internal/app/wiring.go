@@ -81,11 +81,19 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		return nil, fmt.Errorf("initializing token service: %w", err)
 	}
 
+	refreshManager := token.NewRefreshTokenManager()
+
 	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
-	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, dummyHash, cfg.AccessTokenTTL, nil, nil)
+	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshManager, dummyHash, cfg.AccessTokenTTL, cfg.RefreshSessionTTL, nil, nil)
 	if err != nil {
 		dbPool.Close()
 		return nil, fmt.Errorf("initializing login usecase: %w", err)
+	}
+
+	refreshUC, err := usecase.NewRefreshUsecase(sessionRepo, tokenSvc, refreshManager, nil, nil)
+	if err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("initializing refresh usecase: %w", err)
 	}
 
 	currentAccountUC, err := usecase.NewCurrentAccountUsecase(sessionRepo, nil)
@@ -94,13 +102,15 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		return nil, fmt.Errorf("initializing current account usecase: %w", err)
 	}
 
-	logoutUC, err := usecase.NewLogoutUsecase(sessionRepo)
+	logoutUC, err := usecase.NewLogoutUsecase(sessionRepo, refreshManager)
 	if err != nil {
 		dbPool.Close()
 		return nil, fmt.Errorf("initializing logout usecase: %w", err)
 	}
 
-	rateLimiter := authmiddleware.NewIPRateLimiter(cfg.LoginRateLimitAttempts, cfg.LoginRateLimitWindow, 10000)
+	loginRateLimiter := authmiddleware.NewIPRateLimiter(cfg.LoginRateLimitAttempts, cfg.LoginRateLimitWindow, 10000)
+	refreshRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
+	logoutRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 
 	authAdapter := &tokenAuthAdapter{tokenSvc: tokenSvc}
 
@@ -109,11 +119,14 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		dbPool,
 		registerUC,
 		loginUC,
+		refreshUC,
 		currentAccountUC,
 		logoutUC,
 		authAdapter,
 		tokenSvc,
-		rateLimiter,
+		loginRateLimiter,
+		refreshRateLimiter,
+		logoutRateLimiter,
 	)
 	router := handler.Routes()
 

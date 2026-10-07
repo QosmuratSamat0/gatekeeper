@@ -23,3 +23,22 @@ func (s Session) IsActive(now time.Time) bool {
 	}
 	return now.Before(s.ExpiresAt)
 }
+
+// RefreshToken represents a persisted cryptographic digest of a refresh token in a session family.
+// Only the SHA-256 digest is stored; raw tokens are never persisted in the database.
+type RefreshToken struct {
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id"`
+	TokenHash  []byte     `json:"-"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	ConsumedAt *time.Time `json:"consumed_at,omitempty"`
+}
+
+// IsActive checks whether the refresh token has not been consumed and has not expired.
+func (r RefreshToken) IsActive(now time.Time) bool {
+	if r.ConsumedAt != nil {
+		return false
+	}
+	return now.Before(r.ExpiresAt)
+}

@@ -7,5 +7,6 @@ Index of ADRs in docs/adr/.
 - 0003: Auth persistence and password hashing
 - 0004: API specification tooling and Swagger 2.0 generation
 - 0005: JWT library selection, Ed25519 signing, and key management policy
+- 0006: Rotating refresh tokens, reuse detection, and session family revocation
 
 Add a line here for every new ADR.

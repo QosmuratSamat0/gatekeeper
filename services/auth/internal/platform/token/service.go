@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/domain"
 )
 
 // Clock abstracts time for deterministic testing.
@@ -92,10 +94,15 @@ func NewTokenService(
 	}, nil
 }
 
-// SignAccessToken creates an asymmetrically signed Ed25519 JWT access token.
-// The JWT header strictly contains alg=EdDSA, typ=JWT, and the active kid.
-// It returns the token string, exact expiration time matching the exp claim, and duration in seconds.
+// SignAccessToken creates an asymmetrically signed Ed25519 JWT access token with the configured default TTL.
 func (s *TokenService) SignAccessToken(subject, sessionID string) (string, time.Time, int64, error) {
+	return s.SignAccessTokenWithExpiry(subject, sessionID, time.Time{})
+}
+
+// SignAccessTokenWithExpiry creates an asymmetrically signed Ed25519 JWT access token
+// with expiration clamped to maxExpiry if provided.
+// If after integer-second truncation/rounding exp <= iat, it returns domain.ErrSessionExpired.
+func (s *TokenService) SignAccessTokenWithExpiry(subject, sessionID string, maxExpiry time.Time) (string, time.Time, int64, error) {
 	if !IsValidUUID(subject) {
 		return "", time.Time{}, 0, fmt.Errorf("%w: invalid subject uuid", ErrInvalidClaimValue)
 	}
@@ -105,9 +112,16 @@ func (s *TokenService) SignAccessToken(subject, sessionID string) (string, time.
 
 	now := s.clock.Now().UTC()
 	iat := now.Unix()
-	exp := now.Add(s.ttl).Unix()
+	targetExp := now.Add(s.ttl)
+	if !maxExpiry.IsZero() && targetExp.After(maxExpiry) {
+		targetExp = maxExpiry
+	}
+	exp := targetExp.Unix()
+	if exp <= iat {
+		return "", time.Time{}, 0, domain.ErrSessionExpired
+	}
 	expiresAt := time.Unix(exp, 0).UTC()
-	expiresIn := int64(s.ttl.Seconds())
+	expiresIn := exp - iat
 
 	jti, err := generateUUID()
 	if err != nil {

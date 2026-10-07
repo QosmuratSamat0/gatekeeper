@@ -28,7 +28,7 @@ func (m *mockRegistrationService) Execute(ctx context.Context, input usecase.Reg
 
 func newTestRouter(regSvc delivery.RegistrationService) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := delivery.NewHandler(logger, nil, regSvc, nil, nil, nil, nil, nil, nil)
+	handler := delivery.NewHandler(logger, nil, regSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return handler.Routes()
 }
 
@@ -297,7 +297,7 @@ func TestRegisterHandler_LogSafety_NoSecretsLeaked(t *testing.T) {
 		},
 	}
 
-	handler := delivery.NewHandler(testLogger, nil, mockSvc, nil, nil, nil, nil, nil, nil)
+	handler := delivery.NewHandler(testLogger, nil, mockSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router := handler.Routes()
 
 	body := `{"email":"test@example.com","password":"valid-password-15chars"}`

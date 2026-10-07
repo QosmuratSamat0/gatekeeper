@@ -264,7 +264,7 @@ func TestPostgres_HTTPRegistrationEndToEnd(t *testing.T) {
 	hasher := password.NewArgon2idHasherWithParams(1024, 1, 1, 16, 32, 2)
 	uc := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
 	discardLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	handler := delivery.NewHandler(discardLogger, pool, uc, nil, nil, nil, nil, nil, nil)
+	handler := delivery.NewHandler(discardLogger, pool, uc, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router := handler.Routes()
 
 	// 1. Initial successful registration

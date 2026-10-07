@@ -1,5 +1,42 @@
 # Journal
 
+### 2026-10-07 13:25 - AUTH-03-REVIEW-FIXES - Remediation of Codex review findings
+- Done: addressed all 5 review remarks from Codex on AUTH-03:
+  1. Decoupled usecases from concrete platform/token adapter: defined consumer-owned ports RefreshTokenGenerator, RefreshTokenValidator, and RefreshTokenManager in usecase/ports.go; eliminated platform/token imports from login.go, refresh.go, and logout.go; wired token.NewRefreshTokenManager() via app/wiring.go.
+  2. Added re-verification of actual wall-clock expiry immediately before database mutations in session.go RotateRefreshToken (preventing chk_refresh_tokens_expiry_order database constraint violation and 500 error; returns generic 401 with rollback). Also mapped domain.ErrSessionExpired from signFn directly to generic 401 domain.ErrInvalidCredentials.
+  3. Fixed logout mutual exclusivity bypass in logout.go: strictly check header presence (len(authHeaders) > 0) regardless of whitespace/content, returning 400 invalid_request if any Authorization header is sent alongside a refresh request body.
+  4. Aligned 400 Bad Request error codes across refresh and refresh-logout endpoints to invalid_request (replacing bad_request), verified in unit and integration test JSON assertions.
+  5. Strengthened integration tests in refresh_postgres_test.go:
+     - TestPostgres_Refresh_ConcurrentSameTokenRace: asserted strictly 1 success (200 OK) and remaining numWorkers - 1 return 401 Unauthorized (prohibiting 0 successes).
+     - TestPostgres_Refresh_SignerExpLeqIatRollback: validated rollback with real TokenService signer detecting exp <= iat using a deterministic fixed signer clock with a fully valid database session, asserting that the callback was called, returned domain.ErrSessionExpired, and all database mutations were rolled back.
+     - TestPostgres_Logout_DualModes: verified logout via refresh mode after access token expiration (401 on expired bearer token, 204 on refresh logout, session revoked in DB), and verified empty Authorization: + body returns 400 invalid_request.
+     - TestPostgres_Refresh_SuccessorInsertFailureRollback: verified rollback on successor token insertion conflict, and verified old refresh token remains valid and usable on subsequent 200 OK refresh.
+  6. Added /services/auth/keys/ to root .gitignore with explanatory English comment; verified rule matching via git check-ignore without opening or printing key contents. Added hard rules to .ai/rules.md and .ai/workflow.md explicitly prohibiting viewing, reading, editing, or committing local signing keys and /services/auth/keys/.
+  7. Successfully executed full verification suite: unit tests (100% pass), gofmt -l . (0 files), go vet (clean), golangci-lint (0 issues), Linux race detector (-race, 0 races), PostgreSQL 16 integration tests (15/15 tests pass), Docker build gatekeeper-auth:ci (success), Trivy vulnerability scan (0 vulnerabilities, 0 secrets).
+- Files: .gitignore, .ai/rules.md, .ai/workflow.md, internal/usecase/*, internal/repository/postgres/session.go, internal/delivery/http/*, internal/app/wiring.go, internal/platform/token/refresh.go, test/integration/*.
+- Decisions: consumer-owned interfaces enforce clean architecture; pre-mutation expiry check prevents constraint violation 500s; strict header presence enforcement prevents ambiguous credential bypass.
+- Problems: none.
+- Next: presentation of results to user and Codex.
+- Commit: pending explicit user instruction.
+
+### 2026-10-06 20:50 - AUTH-03-IMPL - Rotating refresh tokens and reuse detection
+- Done: implemented AUTH-03 according to approved specification, Codex plan, and mandatory clarifications:
+  1. Recorded ADR 0006 on rotating refresh tokens, SHA-256 binary storage, reuse detection, and session family revocation.
+  2. Created migration 000003_create_refresh_tokens (CHECK octet_length=32, temporal checks, partial unique index for active session token).
+  3. Implemented token generation and strict unpadded base64url validation (RFC 4648 canonical, exactly 43 chars, SHA-256 hashing) in internal/platform/token/refresh.go.
+  4. Implemented SignAccessTokenWithExpiry in TokenService with clamping to session expiry and rejection when exp <= iat.
+  5. Implemented atomic repository methods in SessionRepository: CreateWithInitialRefresh, RevokeByRefreshTokenHash, and RotateRefreshToken with strict lock ordering (accounts SHARE -> sessions UPDATE -> refresh_tokens UPDATE), actual wall-clock re-verification under locks, and permanent committed revocation upon reuse detection.
+  6. Updated LoginUsecase to return refresh_token and refresh_expires_in; implemented RefreshUsecase keeping raw token exclusively in usecase layer; updated LogoutUsecase for dual-mode revocation.
+  7. Implemented HTTP delivery: POST /v1/auth/refresh, updated POST /v1/auth/login, dual-mode POST /v1/auth/logout rejecting combined credentials with 400.
+  8. Configured independent 10/min/IP rate limiters for login, refresh, and logout.
+  9. Regenerated Swagger 2.0 specifications via swag init (swagger.yaml, swagger.json, docs.go).
+  10. Verified entire test and security pipeline: unit tests (100% pass), gofmt (clean), go vet (clean), golangci-lint (0 issues), Linux race detector (-race, 0 races), PostgreSQL 16 integration tests (14/14 tests pass), Docker build (success), Trivy vulnerability scan (0 vulnerabilities).
+- Files: docs/adr/0006-*.md, migrations/000003_*, internal/domain/*, internal/platform/token/*, internal/platform/config/*, internal/repository/postgres/*, internal/usecase/*, internal/delivery/http/*, internal/app/*, test/integration/*.
+- Decisions: ADR 0006 accepted; raw refresh tokens never handled by repository; state and time re-verified under acquired row locks; family revoked permanently upon replay.
+- Problems: staticcheck QF1001 resolved in refresh.go character validation using switch statement.
+- Next: Codex review of AUTH-03 implementation results.
+- Commit: pending
+
 ### 2026-10-05 - AUTH-02-REVIEW-FIXES - Remediation of Codex review findings
 - Done: resolved all 8 review issues (1 P1, 7 P2) and 3 additional items:
   1. Created .dockerignore in services/auth and root to exclude .env, keys, certificates, and caches from Docker builder cache.
@@ -240,3 +277,12 @@
 - Decisions: no implementation changes in this record commit.
 - Next: push and verify remote hash and GitHub CI.
 - Commit: security update d563dba; record commit pending.
+
+### 2026-10-07 - AUTH-03-DELIVERY - Accepted refresh rotation and prepared session management
+- Done: Codex accepted the implementation and deterministic signer rollback test; user confirmed manual API flow. Signing keys excluded from Git and protected in AI rules. User authorized commit and push. Prepared AUTH-04 brief; no AUTH-04 code written.
+- Files: services/auth AUTH-03 implementation, generated Swagger, migration 000003, ADR 0006, .gitignore and .ai documents.
+- Verification: Gemini reported PostgreSQL 16 tests 15/15, Linux race, lint, Docker and Trivy success. Codex reran unit tests and go vet; local integration suite skips without opt-in. Manual verification confirmed by user.
+- Decisions: AUTH-04 covers owned sessions and transactional revocation; email verification/recovery remain later slices.
+- Problems: none outstanding in reviewed AUTH-03 scope.
+- Next: record delivery hash, push main, verify remote and CI; Gemini presents AUTH-04 plan.
+- Commit: pending.

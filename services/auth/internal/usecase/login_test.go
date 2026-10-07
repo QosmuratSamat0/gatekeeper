@@ -41,6 +41,15 @@ func (m *mockSessionRepo) CreateAtomic(ctx context.Context, session domain.Sessi
 	return nil
 }
 
+func (m *mockSessionRepo) CreateWithInitialRefresh(ctx context.Context, session domain.Session, expectedHash string, initialToken domain.RefreshToken) error {
+	acc, exists := m.accounts[session.AccountID]
+	if !exists || acc.Status != domain.AccountStatusActive || acc.PasswordHash != expectedHash {
+		return domain.ErrInvalidCredentials
+	}
+	m.sessions[session.ID] = session
+	return nil
+}
+
 func (m *mockSessionRepo) GetWithAccount(ctx context.Context, sessionID string) (domain.Session, domain.Account, error) {
 	sess, exists := m.sessions[sessionID]
 	if !exists {
@@ -62,6 +71,14 @@ func (m *mockSessionRepo) Revoke(ctx context.Context, sessionID string, accountI
 	sess.RevokedAt = &now
 	m.sessions[sessionID] = sess
 	return false, nil
+}
+
+func (m *mockSessionRepo) RevokeByRefreshTokenHash(ctx context.Context, tokenHash []byte) (bool, error) {
+	return false, nil
+}
+
+func (m *mockSessionRepo) RotateRefreshToken(ctx context.Context, presentedHash []byte, successorToken domain.RefreshToken, signFn SignSuccessorCallback) (*RotationResult, error) {
+	return &RotationResult{}, nil
 }
 
 type mockVerifier struct {
@@ -97,6 +114,10 @@ func (m *mockTokenSigner) SignAccessToken(subject, sessionID string) (string, ti
 	return m.tokenToReturn, expAt, 600, nil
 }
 
+func (m *mockTokenSigner) SignAccessTokenWithExpiry(subject, sessionID string, maxExpiry time.Time) (string, time.Time, int64, error) {
+	return m.SignAccessToken(subject, sessionID)
+}
+
 type fixedUUIDGen struct {
 	id string
 }
@@ -111,6 +132,38 @@ type mockClock struct {
 
 func (m mockClock) Now() time.Time {
 	return m.now
+}
+
+type mockRefreshTokenManager struct {
+	rawToken  string
+	tokenHash []byte
+	genErr    error
+	valErr    error
+}
+
+func (m *mockRefreshTokenManager) Generate() (string, []byte, error) {
+	if m.genErr != nil {
+		return "", nil, m.genErr
+	}
+	raw := m.rawToken
+	if raw == "" {
+		raw = "mock-refresh-token-43-chars-long-test123abc"
+	}
+	hash := m.tokenHash
+	if len(hash) == 0 {
+		hash = []byte("12345678901234567890123456789012")
+	}
+	return raw, hash, nil
+}
+
+func (m *mockRefreshTokenManager) ValidateAndHash(rawToken string) ([]byte, error) {
+	if m.valErr != nil {
+		return nil, m.valErr
+	}
+	if len(m.tokenHash) > 0 {
+		return m.tokenHash, nil
+	}
+	return []byte("12345678901234567890123456789012"), nil
 }
 
 func TestLoginUsecase_Success(t *testing.T) {
@@ -132,7 +185,7 @@ func TestLoginUsecase_Success(t *testing.T) {
 	signer := &mockTokenSigner{tokenToReturn: "mock.jwt.token"}
 
 	dummyHash := "$argon2id$v=19$m=65536,t=3,p=1$fake$dummyhash"
-	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, dummyHash, 10*time.Minute, fixedUUIDGen{id: sessID}, clock)
+	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, dummyHash, 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: sessID}, clock)
 	if err != nil {
 		t.Fatalf("failed to create usecase: %v", err)
 	}
@@ -166,7 +219,7 @@ func TestLoginUsecase_MissingAccountRunsDummyVerification(t *testing.T) {
 	signer := &mockTokenSigner{tokenToReturn: "token"}
 
 	dummyHash := "$argon2id$v=19$m=65536,t=3,p=1$fake$dummyhash"
-	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, dummyHash, 10*time.Minute, fixedUUIDGen{id: "id"}, nil)
+	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, dummyHash, 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: "id"}, nil)
 	if err != nil {
 		t.Fatalf("failed to create usecase: %v", err)
 	}
@@ -204,7 +257,7 @@ func TestLoginUsecase_DisabledAccountRunsStoredHashVerification(t *testing.T) {
 	signer := &mockTokenSigner{tokenToReturn: "token"}
 
 	dummyHash := "$argon2id$v=19$m=65536,t=3,p=1$fake$dummyhash"
-	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, dummyHash, 10*time.Minute, fixedUUIDGen{id: "id"}, nil)
+	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, dummyHash, 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: "id"}, nil)
 	if err != nil {
 		t.Fatalf("failed to create usecase: %v", err)
 	}
@@ -233,7 +286,7 @@ func TestLoginUsecase_BoundaryAndMalformedPasswords(t *testing.T) {
 	signer := &mockTokenSigner{tokenToReturn: "token"}
 
 	dummyHash := "$argon2id$v=19$m=65536,t=3,p=1$fake$dummyhash"
-	uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, dummyHash, 10*time.Minute, fixedUUIDGen{id: "id"}, nil)
+	uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, dummyHash, 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: "id"}, nil)
 
 	tests := []struct {
 		name     string
@@ -332,7 +385,7 @@ func TestLogoutUsecase(t *testing.T) {
 		accounts: make(map[string]domain.Account),
 	}
 
-	uc, err := NewLogoutUsecase(sessRepo)
+	uc, err := NewLogoutUsecase(sessRepo, &mockRefreshTokenManager{})
 	if err != nil {
 		t.Fatalf("failed to create logout usecase: %v", err)
 	}
@@ -370,7 +423,7 @@ func TestLoginUsecase_SessionExpiresAtMatchesJWTExactly(t *testing.T) {
 	verifier := &mockVerifier{matchResult: true}
 	signer := &mockTokenSigner{tokenToReturn: "token", expiresAt: fixedExp}
 
-	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, "dummy", 10*time.Minute, fixedUUIDGen{id: sessID}, nil)
+	uc, err := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, "dummy", 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: sessID}, nil)
 	if err != nil {
 		t.Fatalf("create usecase: %v", err)
 	}
@@ -381,8 +434,8 @@ func TestLoginUsecase_SessionExpiresAtMatchesJWTExactly(t *testing.T) {
 	}
 
 	sess := sessRepo.sessions[sessID]
-	if !sess.ExpiresAt.Equal(fixedExp) {
-		t.Errorf("expected session ExpiresAt to match token expiration %v, got %v", fixedExp, sess.ExpiresAt)
+	if sess.ExpiresAt.Before(time.Now().Add(719 * time.Hour)) {
+		t.Errorf("expected session ExpiresAt to match sessionTTL (approx 720h), got %v", sess.ExpiresAt)
 	}
 }
 
@@ -396,7 +449,7 @@ func TestLoginUsecase_VerifierErrorPropagation(t *testing.T) {
 		verifier := &mockVerifier{verifyErr: errors.New("argon2 allocation failed")}
 		signer := &mockTokenSigner{tokenToReturn: "token"}
 
-		uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, "dummy", 10*time.Minute, fixedUUIDGen{id: sessID}, nil)
+		uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, "dummy", 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: sessID}, nil)
 		_, err := uc.Execute(context.Background(), LoginInput{Email: "notfound@example.com", Password: "Password123"})
 		if err == nil || errors.Is(err, domain.ErrInvalidCredentials) {
 			t.Fatalf("expected system verification error to be propagated, got: %v", err)
@@ -415,7 +468,7 @@ func TestLoginUsecase_VerifierErrorPropagation(t *testing.T) {
 		verifier := &mockVerifier{verifyErr: domain.ErrInternalCredentialFailure}
 		signer := &mockTokenSigner{tokenToReturn: "token"}
 
-		uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, "dummy", 10*time.Minute, fixedUUIDGen{id: sessID}, nil)
+		uc, _ := NewLoginUsecase(accRepo, sessRepo, verifier, signer, &mockRefreshTokenManager{}, "dummy", 10*time.Minute, 720*time.Hour, fixedUUIDGen{id: sessID}, nil)
 		_, err := uc.Execute(context.Background(), LoginInput{Email: "disabled@example.com", Password: "Password123"})
 		if err == nil || errors.Is(err, domain.ErrInvalidCredentials) {
 			t.Fatalf("expected verifier error for disabled account to be propagated, got: %v", err)

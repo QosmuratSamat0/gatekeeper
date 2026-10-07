@@ -37,11 +37,33 @@ func (m *mockCurrentAccountService) Execute(ctx context.Context, accountID, sess
 }
 
 type mockLogoutService struct {
-	executeFn func(ctx context.Context, accountID, sessionID string) error
+	executeFn        func(ctx context.Context, accountID, sessionID string) error
+	executeRefreshFn func(ctx context.Context, rawRefreshToken string) error
 }
 
 func (m *mockLogoutService) Execute(ctx context.Context, accountID, sessionID string) error {
-	return m.executeFn(ctx, accountID, sessionID)
+	if m.executeFn != nil {
+		return m.executeFn(ctx, accountID, sessionID)
+	}
+	return nil
+}
+
+func (m *mockLogoutService) ExecuteByRefreshToken(ctx context.Context, rawRefreshToken string) error {
+	if m.executeRefreshFn != nil {
+		return m.executeRefreshFn(ctx, rawRefreshToken)
+	}
+	return nil
+}
+
+type mockRefreshService struct {
+	executeFn func(ctx context.Context, input usecase.RefreshInput) (usecase.RefreshOutput, error)
+}
+
+func (m *mockRefreshService) Execute(ctx context.Context, input usecase.RefreshInput) (usecase.RefreshOutput, error) {
+	if m.executeFn != nil {
+		return m.executeFn(ctx, input)
+	}
+	return usecase.RefreshOutput{}, nil
 }
 
 type mockTokenVerifier struct {
@@ -63,6 +85,7 @@ func (m *mockJWKSProvider) JWKSJSON() ([]byte, error) {
 
 func setupFullTestRouter(
 	loginSvc delivery.LoginService,
+	refreshSvc delivery.RefreshService,
 	meSvc delivery.CurrentAccountService,
 	logoutSvc delivery.LogoutService,
 	verifier authmiddleware.TokenVerifier,
@@ -70,7 +93,7 @@ func setupFullTestRouter(
 	limiter *authmiddleware.IPRateLimiter,
 ) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	handler := delivery.NewHandler(logger, nil, nil, loginSvc, meSvc, logoutSvc, verifier, jwks, limiter)
+	handler := delivery.NewHandler(logger, nil, nil, loginSvc, refreshSvc, meSvc, logoutSvc, verifier, jwks, limiter, limiter, limiter)
 	return handler.Routes()
 }
 
@@ -93,7 +116,7 @@ func TestLoginHandler_Success(t *testing.T) {
 		},
 	}
 
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, nil)
 
 	body := `{"email":"user@example.com","password":"ValidPassword123"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewBufferString(body))
@@ -142,7 +165,7 @@ func TestLoginHandler_InvalidCredentials(t *testing.T) {
 		},
 	}
 
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, nil)
 
 	body := `{"email":"unknown@example.com","password":"any-password"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewBufferString(body))
@@ -172,7 +195,7 @@ func TestLoginHandler_PayloadTooLarge(t *testing.T) {
 			return usecase.LoginOutput{}, nil
 		},
 	}
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, nil)
 
 	// Body exceeding 4 KiB in trailing data
 	oversizedBody := `{"email":"user@example.com","password":"ValidPassword123"}` + strings.Repeat(" ", 5000)
@@ -193,7 +216,7 @@ func TestLoginHandler_ContextCancellation(t *testing.T) {
 			return usecase.LoginOutput{}, context.Canceled
 		},
 	}
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, nil)
 
 	t.Run("client aborted context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -229,7 +252,7 @@ func TestLoginHandler_Timeout(t *testing.T) {
 			return usecase.LoginOutput{}, context.DeadlineExceeded
 		},
 	}
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, nil)
 
 	t.Run("usecase returned context.DeadlineExceeded", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(`{"email":"user@example.com","password":"ValidPassword123"}`))
@@ -279,7 +302,7 @@ func TestLoginHandler_RateLimiting(t *testing.T) {
 	}
 
 	limiter := authmiddleware.NewIPRateLimiter(10, time.Minute, 100)
-	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, limiter)
+	router := setupFullTestRouter(mockLogin, nil, nil, nil, nil, nil, limiter)
 
 	// Send 10 failed requests from the same RemoteAddr
 	for i := 1; i <= 10; i++ {
@@ -345,7 +368,7 @@ func TestCurrentAccountHandler(t *testing.T) {
 		},
 	}
 
-	router := setupFullTestRouter(nil, mockMe, nil, mockVerifier, nil, nil)
+	router := setupFullTestRouter(nil, nil, mockMe, nil, mockVerifier, nil, nil)
 
 	// 1. Success with Bearer token (case-insensitive) and envelope response
 	req := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
@@ -416,6 +439,12 @@ func TestLogoutHandler(t *testing.T) {
 			}
 			return domain.ErrSessionNotFound
 		},
+		executeRefreshFn: func(ctx context.Context, rawRefreshToken string) error {
+			if rawRefreshToken == "valid-refresh-token-43-chars-long-test123" {
+				return nil
+			}
+			return domain.ErrInvalidCredentials
+		},
 	}
 
 	mockVerifier := &mockTokenVerifier{
@@ -427,9 +456,9 @@ func TestLogoutHandler(t *testing.T) {
 		},
 	}
 
-	router := setupFullTestRouter(nil, nil, mockLogout, mockVerifier, nil, nil)
+	router := setupFullTestRouter(nil, nil, nil, mockLogout, mockVerifier, nil, nil)
 
-	// 1. First logout -> 204
+	// 1. Bearer logout -> 204
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	w := httptest.NewRecorder()
@@ -442,7 +471,7 @@ func TestLogoutHandler(t *testing.T) {
 		t.Errorf("expected empty body for 204, got %s", w.Body.String())
 	}
 
-	// 2. Repeat logout -> 204 (idempotent)
+	// 2. Repeat Bearer logout -> 204 (idempotent)
 	reqRepeat := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
 	reqRepeat.Header.Set("Authorization", "Bearer valid-token")
 	wRepeat := httptest.NewRecorder()
@@ -451,6 +480,255 @@ func TestLogoutHandler(t *testing.T) {
 	if wRepeat.Code != http.StatusNoContent {
 		t.Fatalf("repeat logout expected 204 No Content, got %d", wRepeat.Code)
 	}
+
+	// 3. Refresh-authenticated logout -> 204
+	refreshBody := `{"refresh_token":"valid-refresh-token-43-chars-long-test123"}`
+	reqRefresh := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", bytes.NewBufferString(refreshBody))
+	reqRefresh.Header.Set("Content-Type", "application/json")
+	wRefresh := httptest.NewRecorder()
+	router.ServeHTTP(wRefresh, reqRefresh)
+
+	if wRefresh.Code != http.StatusNoContent {
+		t.Fatalf("refresh logout expected 204 No Content, got %d: %s", wRefresh.Code, wRefresh.Body.String())
+	}
+
+	// 4. Ambiguous credentials (both Bearer header and refresh body) -> 400 invalid_request
+	reqAmbiguous := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", bytes.NewBufferString(refreshBody))
+	reqAmbiguous.Header.Set("Authorization", "Bearer valid-token")
+	reqAmbiguous.Header.Set("Content-Type", "application/json")
+	wAmbiguous := httptest.NewRecorder()
+	router.ServeHTTP(wAmbiguous, reqAmbiguous)
+
+	if wAmbiguous.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous credentials expected 400 Bad Request, got %d: %s", wAmbiguous.Code, wAmbiguous.Body.String())
+	}
+	var errRespAmbiguous struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(wAmbiguous.Body.Bytes(), &errRespAmbiguous)
+	if errRespAmbiguous.Error.Code != "invalid_request" {
+		t.Errorf("expected error code 'invalid_request', got %s", errRespAmbiguous.Error.Code)
+	}
+
+	// 5. Empty Authorization header with refresh body -> must STILL be rejected with 400 invalid_request
+	// to prevent bypassing mutual exclusivity using an empty header.
+	reqEmptyAuthWithBody := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", bytes.NewBufferString(refreshBody))
+	reqEmptyAuthWithBody.Header.Set("Authorization", "   ")
+	reqEmptyAuthWithBody.Header.Set("Content-Type", "application/json")
+	wEmptyAuthWithBody := httptest.NewRecorder()
+	router.ServeHTTP(wEmptyAuthWithBody, reqEmptyAuthWithBody)
+
+	if wEmptyAuthWithBody.Code != http.StatusBadRequest {
+		t.Fatalf("empty auth header + body expected 400 Bad Request, got %d: %s", wEmptyAuthWithBody.Code, wEmptyAuthWithBody.Body.String())
+	}
+	var errRespEmptyAuth struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(wEmptyAuthWithBody.Body.Bytes(), &errRespEmptyAuth)
+	if errRespEmptyAuth.Error.Code != "invalid_request" {
+		t.Errorf("expected error code 'invalid_request', got %s", errRespEmptyAuth.Error.Code)
+	}
+
+	// 6. Multiple Authorization headers -> 400 invalid_request
+	reqMultiAuth := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
+	reqMultiAuth.Header.Add("Authorization", "Bearer token1")
+	reqMultiAuth.Header.Add("Authorization", "Bearer token2")
+	wMultiAuth := httptest.NewRecorder()
+	router.ServeHTTP(wMultiAuth, reqMultiAuth)
+
+	if wMultiAuth.Code != http.StatusBadRequest {
+		t.Fatalf("multiple auth headers expected 400 Bad Request, got %d", wMultiAuth.Code)
+	}
+	var errRespMultiAuth struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(wMultiAuth.Body.Bytes(), &errRespMultiAuth)
+	if errRespMultiAuth.Error.Code != "invalid_request" {
+		t.Errorf("expected error code 'invalid_request', got %s", errRespMultiAuth.Error.Code)
+	}
+
+	// 7. Malformed JSON body in refresh logout -> 400 invalid_request
+	reqMalformed := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", bytes.NewBufferString("{broken-json"))
+	reqMalformed.Header.Set("Content-Type", "application/json")
+	wMalformed := httptest.NewRecorder()
+	router.ServeHTTP(wMalformed, reqMalformed)
+
+	if wMalformed.Code != http.StatusBadRequest {
+		t.Fatalf("malformed json expected 400 Bad Request, got %d", wMalformed.Code)
+	}
+	var errRespMalformed struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(wMalformed.Body.Bytes(), &errRespMalformed)
+	if errRespMalformed.Error.Code != "invalid_request" {
+		t.Errorf("expected error code 'invalid_request', got %s", errRespMalformed.Error.Code)
+	}
+
+	// 8. Missing all credentials -> 401
+	reqEmpty := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
+	wEmpty := httptest.NewRecorder()
+	router.ServeHTTP(wEmpty, reqEmpty)
+
+	if wEmpty.Code != http.StatusUnauthorized {
+		t.Fatalf("missing credentials expected 401 Unauthorized, got %d", wEmpty.Code)
+	}
+}
+
+func TestRefreshHandler(t *testing.T) {
+	mockRefresh := &mockRefreshService{
+		executeFn: func(ctx context.Context, input usecase.RefreshInput) (usecase.RefreshOutput, error) {
+			if input.RefreshToken == "valid-refresh-token-43-chars-long-test123" {
+				return usecase.RefreshOutput{
+					AccessToken:      "new.access.jwt",
+					TokenType:        "Bearer",
+					ExpiresIn:        600,
+					RefreshToken:     "successor-refresh-token-43-chars-long-abc",
+					RefreshExpiresIn: 2592000,
+				}, nil
+			}
+			if input.RefreshToken == "compromised-token" {
+				return usecase.RefreshOutput{}, domain.ErrCompromisedSessionReplay
+			}
+			return usecase.RefreshOutput{}, domain.ErrInvalidCredentials
+		},
+	}
+
+	router := setupFullTestRouter(nil, mockRefresh, nil, nil, nil, nil, nil)
+
+	t.Run("successful refresh", func(t *testing.T) {
+		body := `{"refresh_token":"valid-refresh-token-43-chars-long-test123"}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("expected Cache-Control: no-store, got %s", w.Header().Get("Cache-Control"))
+		}
+		if w.Header().Get("Pragma") != "no-cache" {
+			t.Errorf("expected Pragma: no-cache, got %s", w.Header().Get("Pragma"))
+		}
+
+		var resp struct {
+			AccessToken      string `json:"access_token"`
+			TokenType        string `json:"token_type"`
+			ExpiresIn        int64  `json:"expires_in"`
+			RefreshToken     string `json:"refresh_token"`
+			RefreshExpiresIn int64  `json:"refresh_expires_in"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.AccessToken != "new.access.jwt" {
+			t.Errorf("expected access_token 'new.access.jwt', got %s", resp.AccessToken)
+		}
+		if resp.RefreshToken != "successor-refresh-token-43-chars-long-abc" {
+			t.Errorf("expected successor refresh token, got %s", resp.RefreshToken)
+		}
+	})
+
+	t.Run("missing refresh_token field", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request, got %d", w.Code)
+		}
+		var errResp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+		if errResp.Error.Code != "invalid_request" {
+			t.Errorf("expected error code 'invalid_request', got %s", errResp.Error.Code)
+		}
+	})
+
+	t.Run("malformed json body", func(t *testing.T) {
+		body := `{"refresh_token":`
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request, got %d", w.Code)
+		}
+		var errResp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+		if errResp.Error.Code != "invalid_request" {
+			t.Errorf("expected error code 'invalid_request', got %s", errResp.Error.Code)
+		}
+	})
+
+	t.Run("replay token returns generic 401", func(t *testing.T) {
+		body := `{"refresh_token":"compromised-token"}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized on replay, got %d", w.Code)
+		}
+		var errResp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+		if errResp.Error.Code != "invalid_credentials" {
+			t.Errorf("expected generic code 'invalid_credentials', got %s", errResp.Error.Code)
+		}
+	})
+
+	t.Run("payload too large", func(t *testing.T) {
+		oversized := `{"refresh_token":"token"}` + strings.Repeat(" ", 5000)
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", strings.NewReader(oversized))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected 413, got %d", w.Code)
+		}
+	})
+
+	t.Run("unsupported media type", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", strings.NewReader(`{"refresh_token":"token"}`))
+		req.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("expected 415, got %d", w.Code)
+		}
+	})
 }
 
 func TestJWKSHandler(t *testing.T) {
@@ -458,7 +736,7 @@ func TestJWKSHandler(t *testing.T) {
 		jsonBytes: []byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","x":"pubkey","kid":"k1","use":"sig"}]}`),
 	}
 
-	router := setupFullTestRouter(nil, nil, nil, nil, mockJWKS, nil)
+	router := setupFullTestRouter(nil, nil, nil, nil, nil, mockJWKS, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	w := httptest.NewRecorder()
