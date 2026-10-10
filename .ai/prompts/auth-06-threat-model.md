@@ -5,7 +5,7 @@ review tied to these concrete risks and controls.
 
 | Threat | Required control | Evidence |
 | --- | --- | --- |
-| Account enumeration | Same public status/body for all valid email requests; in-process async email dispatch decouples remote SMTP latency from HTTP response. Residual timing risk remains due to database query differences between existing and missing accounts (not fully eliminated without dummy DB writes or async outbox) | HTTP tests for existing, missing, unverified and suppressed accounts; timing analysis review |
+| Account enumeration | Same public status/body for all valid email requests; in-process async email dispatch decouples remote SMTP latency from HTTP response. Residual timing risk remains due to database query differences between existing and missing accounts; approaches to reduce it must be evaluated separately | HTTP tests for existing, missing, unverified and suppressed accounts; timing analysis review |
 | Token theft or replay | Cryptographically random token, digest-only storage, short expiry, single-use transaction | Token tests and PostgreSQL consume/replay tests |
 | Token guessing | High-entropy token and bounded confirmation rate limits | Configuration review and rate-limit tests |
 | Mailbox compromise | Reset email contains only the one-time token and clear expiry; successful reset revokes sessions | Email test and session-revocation integration test |

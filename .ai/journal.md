@@ -434,3 +434,12 @@
 - Problems: None.
 - Next: Verify origin/main and push the three commits in this delivery chain.
 - Commit: pending.
+
+### 2026-10-10 - AUTH06-SWAGGER-ENDLINE - Keep generated Swagger stable under pre-commit
+- Done: Corrected the AUTH-06 residual-timing threat-model wording and excluded generated `services/auth/api/swagger.json` from the end-of-file fixer, matching Swag v1.16.4 output.
+- Files: .ai/prompts/auth-06-threat-model.md, .ai/tasks/current.md, .pre-commit-config.yaml, services/auth/api/swagger.json, .ai/journal.md.
+- Decisions: Generated Swagger output is authoritative; the formatter must not add a newline the generator removes.
+- Verification: Local `swag` v1.16.4 regenerated the API artifacts with only the expected final-newline difference; `pre-commit validate-config`, `git diff --check`, and the targeted end-of-file hook passed.
+- Problems: The network was unavailable for `go run ...@v1.16.4`; the installed `swag` binary matched v1.16.4 and generated the observed CI diff.
+- Next: Commit the corrected generated artifact and hook exclusion, then push after pre-push checks.
+- Commit: pending.
