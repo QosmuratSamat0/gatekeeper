@@ -416,13 +416,21 @@
 - Files: .ai/tasks/auth-06.md, .ai/prompts/auth-06-threat-model.md, docs/adr/0009-password-recovery.md, .ai/tasks/current.md, .ai/journal.md.
 - Decisions: AUTH-06 remains a proposal; implementation is not authorized until Codex reviews the revised plan.
 - Problems: Deployment manifests are not part of the current proposal, so the 75-second termination grace remains an operational requirement rather than a checked manifest value.
-- Next: Commit the revised design, then prepare the local pre-commit and pre-push checks.
-- Commit: pending.
+- Next: Record the commit hash and push after checking origin/main.
+- Commit: `9f79d87`.
 
 ### 2026-10-10 - LOCAL-PRE-PUSH-CHECKS - Configure repository hygiene and Auth tests
 - Done: Added pre-commit file hygiene and Gitleaks scanning, and configured `go -C services/auth test ./...` for pre-push. Installed the pre-push hook locally and ran it; tests and secret scan passed. The first run added missing final newlines, and a subsequent commit hook passed on the AUTH-06 documentation commit.
 - Files: .pre-commit-config.yaml, .gitleaks.toml, .ai/commands.md, .ai/prompts/code-review.md, .ai/prompts/new-service.md, .ai/prompts/threat-model.md, .ai/workflow.md, .githooks/pre-commit, CLAUDE.md, GEMINI.md, README.md, docs/adr/0001-use-go-and-monorepo.md, services/auth/api/swagger.json, .ai/tasks/current.md, .ai/journal.md.
 - Decisions: Removed unrelated Python lint hooks from this Go repository. Local certificates and temporary files remain excluded. The unrelated CI trigger edit remains unstaged.
 - Problems: A standalone rerun inside this tool session could not write the shared pre-commit cache, but the user's PowerShell run passed all checks except the first-run final-newline fixer; the actual AUTH-06 commit hook passed.
-- Next: Commit the local checks, then record both commit hashes and push after remote synchronization check.
+- Next: Record the commit hash and push after checking origin/main.
+- Commit: `b709210`.
+
+### 2026-10-10 - LOCAL-TOOLS-DELIVERY-RECORD - Record documentation and hook commits
+- Done: Recorded commits `9f79d87` (AUTH-06 proposal update) and `b709210` (local secret and pre-push checks) in the changelog and journal.
+- Files: .ai/journal.md, .ai/changelog.md.
+- Decisions: The unrelated CI trigger change, local certificates, and temporary files were excluded from both commits.
+- Problems: None.
+- Next: Verify origin/main and push the three commits in this delivery chain.
 - Commit: pending.

@@ -1,5 +1,8 @@
 # Changelog
 
+- 9f79d87 2026-10-10 docs(auth-06): align recovery proposal with async delivery - Updated the recovery task, ADR, and threat model for bounded in-process email delivery and its residual risks.
+- b709210 2026-10-10 chore(dev): add local secret and push checks - Added Gitleaks and file hygiene hooks plus the Auth Go test suite on pre-push.
+
 - 4d29ab8 2026-10-10 feat(auth): add session management and email verification - Added AUTH-04 session listing/revocation/logout-all and AUTH-05 email verification with digest-only tokens, STARTTLS delivery, migrations, tests, and generated Swagger.
 
 - f226159 2026-10-07 feat(auth): implement rotating refresh tokens and reuse detection - Atomic JSON refresh rotation, persistent reuse revocation, dual-mode logout, PostgreSQL migration/tests, signing-key protection and AUTH-04 brief.
