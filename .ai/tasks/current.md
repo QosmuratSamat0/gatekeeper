@@ -97,10 +97,23 @@
   * Added unit tests in `services/auth/internal/delivery/http/email_verification_test.go` verifying that client-side cancellation during email transmission and direct usecase `context.Canceled` write no body and do not return 503.
   * Re-verified full test suite: unit tests (100%), PostgreSQL integration tests (22/22), `golangci-lint` (0 issues), Linux `-race` (0 data races), Docker build, and Trivy scan (0 findings).
 - Accepted (2026-10-10): User manually tested the AUTH-05 email verification flow and confirmed it works. AUTH-04/AUTH-05 implementation is committed as `4d29ab8`; not pushed.
-- Reviewed: [AUTH-06](auth-06.md) — the proposed bounded in-process dispatcher, drop/shutdown behavior, and residual timing risk are documented. The threat-model wording is corrected; implementation still requires explicit user approval under ADR 0009.
-- Done (2026-10-10): configured local pre-commit hygiene and Gitleaks checks plus the Auth Go test suite on pre-push; installed the pre-push hook in this clone.
-- Done: AUTH-04/AUTH-05 committed as `4d29ab8`; push remains pending separate user authorization.
-- Next: Await explicit user approval for AUTH-06 implementation; then Gemini may implement the approved plan.
+- Done (2026-10-10): [AUTH-06](auth-06.md) — Password recovery by email implementation completed and verified:
+  * Migration `000006_create_password_reset_tokens`: bounded storage table `password_reset_tokens` with `account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE`, SHA-256 binary `token_hash bytea NOT NULL UNIQUE`, `created_at`, `expires_at`.
+  * Cryptographic token manager (`token/password_reset.go`): 32 cryptographically random bytes formatted as unpadded 43-character base64url string; 32-byte SHA-256 digest calculated and stored. Raw tokens are never persisted to disk or logged.
+  * SMTP delivery adapter (`email/smtp.go`): implemented `SendPasswordResetEmail` in standard library SMTP platform adapter with STARTTLS and TLS certificate verification.
+  * Platform configuration (`platform/config/config.go`): added `PASSWORD_RESET_TOKEN_TTL` (default 30m), `PASSWORD_RESET_COOLDOWN` (default 60s), and `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` (default 45s).
+  * Decoupled consumer-owned ports (`usecase/ports.go`): `PasswordResetTokenGenerator`, `IssuePasswordResetTokenResult`, and `PasswordResetRepository` with `IssueResetToken`, `IsTokenActive`, and `ConfirmReset`.
+   * In-process asynchronous delivery dispatcher (`usecase/password_recovery.go`): channel of 8 slots, pool of 4 workers, dedicated application worker context, non-blocking queue overflow drop with safe logging, and 45s graceful drain before database pool closure. Enqueue and Stop synchronized via `sync.RWMutex` to eliminate channel close send panics. Context timeout dynamically aligned to `cfg.DBQueryTimeout + cfg.SMTPSendTimeout` in `app/wiring.go`. Stop cancels workers and awaits their complete termination (`<-done`) on drain timeout, guaranteeing zero active workers before database pool closure.
+   * Concurrency and timeout test coverage: `TestInProcessPasswordResetDispatcher_ConcurrentEnqueueAndStop` (20 concurrent producers, 4,000 tasks) and `TestInProcessPasswordResetDispatcher_CustomTaskTimeout`.
+  * PostgreSQL transactional repository (`repository/postgres/password_reset.go`): canonical lock order (`accounts FOR UPDATE -> password_reset_tokens FOR UPDATE -> sessions (ORDER BY id FOR UPDATE)`); enforces 60s cooldown under lock; atomic token replacement; single transaction updates Argon2id password hash, deletes consumed token, and marks all active sessions revoked (`revoked_at = clock_timestamp()`).
+  * Public request endpoint (`POST /v1/auth/password-reset/request`): generic 202 `{"status":"accepted"}` with `Cache-Control: no-store` for all syntactically valid emails; IP rate limited (10/min); drops delivery on queue overflow without leaking account state.
+  * Public confirmation endpoint (`POST /v1/auth/password-reset/confirm`): strict password length validation (8-128 chars); Argon2id hashing computed before starting database transaction; returns 204 No Content on success; returns identical generic 400 `invalid_password_reset_token` for all invalid/expired/consumed/superseded tokens.
+  * Integration tests (`test/integration/password_recovery_postgres_test.go`): comprehensive suites for complete happy path, unknown/inactive/unverified accounts, cooldown race (1 winner, 9 cooldown), concurrent confirmation race (1 winner, 4 invalid), superseded token rejection, and expired token rejection.
+  * Swagger 2.0 specifications regenerated via pinned Swag v1.16.4 (`api/docs.go`, `api/swagger.json`, `api/swagger.yaml`).
+  * Tracked config template updated in `services/auth/.env.example` and documentation in `services/auth/README.md`.
+  * Full Go test suite (`go test -v ./...`), `go vet ./...`, `gofmt -l .`, and `git diff --check` pass cleanly.
+- Done (2026-10-11): User manually tested the AUTH-06 password recovery flow and confirmed it works. All unit, dispatcher, and lifecycle tests pass.
+- Next: Record AUTH-06 commit hash and proceed to foundation S0.3 (GHCR image push).
 
 ## Previous foundation task (pending)
 Stage 0, weeks 1-2: foundation.

@@ -299,3 +299,102 @@ func TestSMTPEmailSender_TimeoutEnforced(t *testing.T) {
 		t.Fatalf("expected operation to abort near 200ms, took %v", duration)
 	}
 }
+
+func TestSMTPEmailSender_PasswordResetEmailDelivery(t *testing.T) {
+	tlsCert, caPool := generateTestCert(t, "localhost")
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer func() { _ = l.Close() }()
+
+	receivedData := make(chan string, 1)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		tp := textproto.NewConn(conn)
+
+		_ = tp.PrintfLine("220 localhost ESMTP test")
+		_, _ = tp.ReadLine() // EHLO
+
+		_ = tp.PrintfLine("250-localhost")
+		_ = tp.PrintfLine("250 STARTTLS")
+
+		line, _ := tp.ReadLine() // STARTTLS
+		if line != "STARTTLS" {
+			return
+		}
+		_ = tp.PrintfLine("220 2.0.0 Ready to start TLS")
+
+		tlsServer := tls.Server(conn, &tls.Config{
+			Certificates: []tls.Certificate{tlsCert},
+		})
+		if err := tlsServer.Handshake(); err != nil {
+			return
+		}
+		defer func() { _ = tlsServer.Close() }()
+
+		tlsTp := textproto.NewConn(tlsServer)
+		_, _ = tlsTp.ReadLine() // EHLO after TLS
+
+		_ = tlsTp.PrintfLine("250-localhost")
+		_ = tlsTp.PrintfLine("250 OK")
+
+		_, _ = tlsTp.ReadLine() // MAIL FROM:...
+		_ = tlsTp.PrintfLine("250 2.1.0 Ok")
+
+		_, _ = tlsTp.ReadLine() // RCPT TO:...
+		_ = tlsTp.PrintfLine("250 2.1.5 Ok")
+
+		_, _ = tlsTp.ReadLine() // DATA
+		_ = tlsTp.PrintfLine("354 End data with <CR><LF>.<CR><LF>")
+
+		var bodyBuilder strings.Builder
+		for {
+			line, err := tlsTp.ReadLine()
+			if err != nil || line == "." {
+				break
+			}
+			bodyBuilder.WriteString(line + "\n")
+		}
+		_ = tlsTp.PrintfLine("250 2.0.0 Ok: queued")
+		_, _ = tlsTp.ReadLine() // QUIT
+
+		receivedData <- bodyBuilder.String()
+	}()
+
+	_, portStr, _ := net.SplitHostPort(l.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	sender := &SMTPEmailSender{
+		host:        "localhost",
+		port:        port,
+		from:        "noreply@gatekeeper.local",
+		caPool:      caPool,
+		sendTimeout: 5 * time.Second,
+	}
+
+	testToken := "resettoken123456789012345678901234567890123"
+	err = sender.SendPasswordResetEmail(context.Background(), "user@example.com", testToken, time.Now().Add(30*time.Minute))
+	if err != nil {
+		t.Fatalf("SendPasswordResetEmail failed: %v", err)
+	}
+
+	select {
+	case body := <-receivedData:
+		if !strings.Contains(body, testToken) {
+			t.Fatalf("expected token in email body, got: %s", body)
+		}
+		if !strings.Contains(body, "Subject: Reset your password") {
+			t.Fatalf("expected Subject header, got: %s", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for email data")
+	}
+}

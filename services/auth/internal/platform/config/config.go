@@ -42,6 +42,11 @@ type Config struct {
 	SMTPSendTimeout           time.Duration
 	EmailVerificationTokenTTL time.Duration
 	EmailVerificationCooldown time.Duration
+
+	// Password Recovery Configuration
+	PasswordResetTokenTTL          time.Duration
+	PasswordResetCooldown          time.Duration
+	PasswordResetQueueDrainTimeout time.Duration
 }
 
 // Load reads and validates configuration from environment variables.
@@ -206,30 +211,60 @@ func Load() (Config, error) {
 		emailVerificationCooldown = d
 	}
 
+	passwordResetTokenTTL := 30 * time.Minute
+	if val := os.Getenv("PASSWORD_RESET_TOKEN_TTL"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 5*time.Minute || d > 24*time.Hour {
+			return Config{}, fmt.Errorf("PASSWORD_RESET_TOKEN_TTL must be a duration between 5m and 24h, got %q", val)
+		}
+		passwordResetTokenTTL = d
+	}
+
+	passwordResetCooldown := 60 * time.Second
+	if val := os.Getenv("PASSWORD_RESET_COOLDOWN"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 10*time.Second || d > 10*time.Minute {
+			return Config{}, fmt.Errorf("PASSWORD_RESET_COOLDOWN must be a duration between 10s and 10m, got %q", val)
+		}
+		passwordResetCooldown = d
+	}
+
+	passwordResetQueueDrainTimeout := 45 * time.Second
+	if val := os.Getenv("PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 5*time.Second || d > 120*time.Second {
+			return Config{}, fmt.Errorf("PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT must be a duration between 5s and 120s, got %q", val)
+		}
+		passwordResetQueueDrainTimeout = d
+	}
+
 	return Config{
-		HTTPAddr:                  addr,
-		DatabaseURL:               dbURL,
-		DBConnectTimeout:          connectTimeout,
-		DBQueryTimeout:            queryTimeout,
-		HTTPShutdownTimeout:       shutdownTimeout,
-		PasswordHashConcurrency:   hashConcurrency,
-		JWTIssuer:                 jwtIssuer,
-		JWTAudience:               jwtAudience,
-		JWTActiveKid:              jwtActiveKid,
-		JWTPrivateKeyFile:         jwtPrivateKeyFile,
-		JWTPublicKeysFile:         jwtPublicKeysFile,
-		AccessTokenTTL:            tokenTTL,
-		LoginRateLimitAttempts:    rateLimitAttempts,
-		LoginRateLimitWindow:      rateLimitWindow,
-		RefreshSessionTTL:         refreshSessionTTL,
-		SMTPHost:                  smtpHost,
-		SMTPPort:                  smtpPort,
-		SMTPUsername:              smtpUsername,
-		SMTPPassword:              smtpPassword,
-		SMTPFrom:                  smtpFrom,
-		SMTPCAFile:                smtpCAFile,
-		SMTPSendTimeout:           smtpSendTimeout,
-		EmailVerificationTokenTTL: emailVerificationTokenTTL,
-		EmailVerificationCooldown: emailVerificationCooldown,
+		HTTPAddr:                       addr,
+		DatabaseURL:                    dbURL,
+		DBConnectTimeout:               connectTimeout,
+		DBQueryTimeout:                 queryTimeout,
+		HTTPShutdownTimeout:            shutdownTimeout,
+		PasswordHashConcurrency:        hashConcurrency,
+		JWTIssuer:                      jwtIssuer,
+		JWTAudience:                    jwtAudience,
+		JWTActiveKid:                   jwtActiveKid,
+		JWTPrivateKeyFile:              jwtPrivateKeyFile,
+		JWTPublicKeysFile:              jwtPublicKeysFile,
+		AccessTokenTTL:                 tokenTTL,
+		LoginRateLimitAttempts:         rateLimitAttempts,
+		LoginRateLimitWindow:           rateLimitWindow,
+		RefreshSessionTTL:              refreshSessionTTL,
+		SMTPHost:                       smtpHost,
+		SMTPPort:                       smtpPort,
+		SMTPUsername:                   smtpUsername,
+		SMTPPassword:                   smtpPassword,
+		SMTPFrom:                       smtpFrom,
+		SMTPCAFile:                     smtpCAFile,
+		SMTPSendTimeout:                smtpSendTimeout,
+		EmailVerificationTokenTTL:      emailVerificationTokenTTL,
+		EmailVerificationCooldown:      emailVerificationCooldown,
+		PasswordResetTokenTTL:          passwordResetTokenTTL,
+		PasswordResetCooldown:          passwordResetCooldown,
+		PasswordResetQueueDrainTimeout: passwordResetQueueDrainTimeout,
 	}, nil
 }

@@ -2,15 +2,21 @@
 
 The `auth` service handles identity registration and credential persistence for Gatekeeper.
 
-## Scope (AUTH-01 & AUTH-02)
+## Scope (AUTH-01 through AUTH-06)
 - Account registration with email and password (`POST /v1/auth/register`).
 - User authentication and session issuance (`POST /v1/auth/login`).
 - Authenticated account profile retrieval (`GET /v1/auth/me`).
 - Idempotent session revocation (`POST /v1/auth/logout`).
+- Active sessions listing (`GET /v1/auth/sessions`) with keyset pagination.
+- Targeted session revocation (`DELETE /v1/auth/sessions/{session_id}`).
+- Account logout-all revocation (`POST /v1/auth/logout-all`).
+- Email verification request (`POST /v1/auth/email/verification/request`) and confirmation (`POST /v1/auth/email/verification/confirm`).
+- Password reset request (`POST /v1/auth/password-reset/request`) with generic 202 anti-enumeration response and bounded in-process asynchronous dispatch.
+- Password reset confirmation (`POST /v1/auth/password-reset/confirm`) with atomic credential update, session revocation, and generic 400 error.
 - Public JSON Web Key Set projection (`GET /.well-known/jwks.json`).
 - Asymmetrically signed access JWTs via Ed25519 / EdDSA (RFC 8037).
 - Secure password hashing and verification with Argon2id and shared concurrency limit.
-- Per-IP rate limiting (10 attempts/minute) on login attempts before hashing.
+- Per-IP rate limiting (10 attempts/minute) on public endpoints.
 - Storage in PostgreSQL with schema migrations via `cmd/migrate`.
 - Health (`/healthz`) and database readiness (`/readyz`) probes.
 
@@ -18,11 +24,11 @@ The `auth` service handles identity registration and credential persistence for 
 - `cmd/api`: HTTP server entry point with graceful signal shutdown.
 - `cmd/migrate`: Database migration runner (`up`, `version`).
 - `internal/domain`: Domain entities (`Account`, `Session`) and typed domain errors.
-- `internal/usecase`: Use cases (`Register`, `Login`, `CurrentAccount`, `Logout`) and consumer ports.
+- `internal/usecase`: Use cases (`Register`, `Login`, `CurrentAccount`, `Logout`, `ListSessions`, `RevokeSession`, `LogoutAll`, `EmailVerification`, `PasswordRecovery`) and consumer ports.
 - `internal/delivery/http`: Chi router, HTTP handlers, strict DTO validation, Bearer auth, IP rate limiting, and standardized error responses.
-- `internal/repository/postgres`: Parameterized PostgreSQL repositories with transactional session creation and atomic account status checks.
-- `internal/platform`: Configuration, PostgreSQL connection pool, Argon2id hasher/verifier, and Ed25519 JWT token manager.
-- `migrations`: Versioned SQL migrations (`000001_accounts`, `000002_sessions`).
+- `internal/repository/postgres`: Parameterized PostgreSQL repositories with transactional session creation, keyset pagination, and atomic token operations.
+- `internal/platform`: Configuration, PostgreSQL connection pool, Argon2id hasher/verifier, Ed25519 JWT token manager, and SMTP email client.
+- `migrations`: Versioned SQL migrations (`000001` through `000006`).
 - `api/`: Generated API contracts via Swag (Go code annotations are the single source of truth).
 
 ## Configuration
@@ -42,6 +48,9 @@ The `auth` service handles identity registration and credential persistence for 
 | `ACCESS_TOKEN_TTL` | `10m` | Access token duration (1m to 15m) |
 | `LOGIN_RATE_LIMIT_ATTEMPTS` | `10` | Maximum login attempts per IP per window |
 | `LOGIN_RATE_LIMIT_WINDOW` | `1m` | Window duration for IP rate limiting |
+| `PASSWORD_RESET_TOKEN_TTL` | `30m` | Password reset token lifetime (5m to 24h) |
+| `PASSWORD_RESET_COOLDOWN` | `60s` | Cooldown between password reset requests for an account (10s to 10m) |
+| `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` | `45s` | Graceful shutdown drain timeout for in-process email delivery queue |
 
 ## Local Development
 

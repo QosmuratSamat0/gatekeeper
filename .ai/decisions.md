@@ -10,6 +10,6 @@ Index of ADRs in docs/adr/.
 - 0006: Rotating refresh tokens, reuse detection, and session family revocation
 - 0007: Account session management and concurrency design
 - 0008: Email verification token and SMTP delivery policy (accepted; implemented in AUTH-05)
-- 0009: Password recovery by email (proposed for AUTH-06; pending user approval)
+- 0009: Password recovery by email (accepted for AUTH-06)
 
 Add a line here for every new ADR.

@@ -86,6 +86,18 @@ func NewSMTPEmailSender(cfg SMTPConfig) (*SMTPEmailSender, error) {
 // SendVerificationEmail delivers a plain-text verification message containing the raw token.
 // The entire SMTP sequence is strictly bounded by SendTimeout and context cancellation.
 func (s *SMTPEmailSender) SendVerificationEmail(ctx context.Context, recipientEmail string, rawToken string, expiresAt time.Time) error {
+	body := buildVerificationEmail(s.from, recipientEmail, rawToken, expiresAt)
+	return s.sendMail(ctx, recipientEmail, body)
+}
+
+// SendPasswordResetEmail delivers a plain-text password recovery message containing the raw token.
+// The entire SMTP sequence is strictly bounded by SendTimeout and context cancellation.
+func (s *SMTPEmailSender) SendPasswordResetEmail(ctx context.Context, recipientEmail string, rawToken string, expiresAt time.Time) error {
+	body := buildPasswordResetEmail(s.from, recipientEmail, rawToken, expiresAt)
+	return s.sendMail(ctx, recipientEmail, body)
+}
+
+func (s *SMTPEmailSender) sendMail(ctx context.Context, recipientEmail string, body []byte) error {
 	// Derive a strictly bounded context using the configured send timeout.
 	// This ensures network I/O cannot hang indefinitely even if the caller passes an unbounded context.
 	sendCtx, cancel := context.WithTimeout(ctx, s.sendTimeout)
@@ -190,9 +202,7 @@ func (s *SMTPEmailSender) SendVerificationEmail(ctx context.Context, recipientEm
 		return fmt.Errorf("smtp data command failed: %w", err)
 	}
 
-	// Construct and send the plain-text message.
-	// Do not include tokens in URLs or query strings.
-	body := buildPlainTextEmail(s.from, recipientEmail, rawToken, expiresAt)
+	// Send plain-text message. Do not include tokens in URLs or query strings.
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 		if sendCtx.Err() != nil {
@@ -212,7 +222,7 @@ func (s *SMTPEmailSender) SendVerificationEmail(ctx context.Context, recipientEm
 	return nil
 }
 
-func buildPlainTextEmail(from, to, token string, expiresAt time.Time) []byte {
+func buildVerificationEmail(from, to, token string, expiresAt time.Time) []byte {
 	headers := []string{
 		"From: " + from,
 		"To: " + to,
@@ -229,6 +239,28 @@ func buildPlainTextEmail(from, to, token string, expiresAt time.Time) []byte {
 		"",
 		"This token will expire at " + expiresAt.UTC().Format(time.RFC3339) + ".",
 		"If you did not request this email, no action is required.",
+	}
+
+	return []byte(strings.Join(headers, "\r\n") + "\r\n" + strings.Join(content, "\r\n") + "\r\n")
+}
+
+func buildPasswordResetEmail(from, to, token string, expiresAt time.Time) []byte {
+	headers := []string{
+		"From: " + from,
+		"To: " + to,
+		"Subject: Reset your password",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+	}
+
+	content := []string{
+		"Please use the following token to reset your password:",
+		"",
+		token,
+		"",
+		"This token will expire at " + expiresAt.UTC().Format(time.RFC3339) + ".",
+		"If you did not request a password reset, no action is required.",
 	}
 
 	return []byte(strings.Join(headers, "\r\n") + "\r\n" + strings.Join(content, "\r\n") + "\r\n")

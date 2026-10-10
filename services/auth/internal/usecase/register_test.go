@@ -271,6 +271,10 @@ func (m *mockEmailSender) SendVerificationEmail(ctx context.Context, recipientEm
 	return nil
 }
 
+func (m *mockEmailSender) SendPasswordResetEmail(ctx context.Context, recipientEmail string, rawToken string, expiresAt time.Time) error {
+	return nil
+}
+
 func TestRegisterUsecase_EmailVerification(t *testing.T) {
 	t.Run("successful registration sends verification email post-commit", func(t *testing.T) {
 		repo := &mockAccountRepo{}

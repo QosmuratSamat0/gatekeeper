@@ -145,6 +145,36 @@ definitions:
       account:
         $ref: '#/definitions/http.accountResponse'
     type: object
+  http.passwordResetConfirmBody:
+    properties:
+      new_password:
+        example: newSecurePassword123!
+        maxLength: 128
+        minLength: 8
+        type: string
+      token:
+        example: _y8k5G3m7Q9zP4rT1wX6sV2bN8cM0kL5jH3dF6gJ9p
+        type: string
+    required:
+    - new_password
+    - token
+    type: object
+  http.passwordResetRequestBody:
+    properties:
+      email:
+        example: user@example.com
+        format: email
+        maxLength: 254
+        type: string
+    required:
+    - email
+    type: object
+  http.passwordResetResponse:
+    properties:
+      status:
+        example: accepted
+        type: string
+    type: object
   http.refreshRequest:
     properties:
       refresh_token:
@@ -524,6 +554,98 @@ paths:
       security:
       - BearerAuth: []
       summary: Get current user profile
+      tags:
+      - auth
+  /v1/auth/password-reset/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Verifies a one-time password reset token, updates the Argon2id
+        password hash, and revokes all active sessions for the account.
+      parameters:
+      - description: Reset token and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.passwordResetConfirmBody'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Password updated and all sessions revoked successfully
+        "400":
+          description: Invalid token or password policy violation
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Request body exceeds limit
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "415":
+          description: Content-Type must be application/json
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "429":
+          description: Too many password reset attempts
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Service temporarily unavailable, please retry
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Confirm password reset
+      tags:
+      - auth
+  /v1/auth/password-reset/request:
+    post:
+      consumes:
+      - application/json
+      description: Accepts an email and asynchronously dispatches a one-time password
+        reset link if the account exists, is active, and verified.
+      parameters:
+      - description: Email for password recovery
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.passwordResetRequestBody'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Reset request accepted
+          schema:
+            $ref: '#/definitions/http.passwordResetResponse'
+        "400":
+          description: Invalid JSON body or invalid email format
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Request body exceeds limit
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "415":
+          description: Content-Type must be application/json
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "429":
+          description: Too many password reset requests
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Service temporarily unavailable, please retry
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Request password reset
       tags:
       - auth
   /v1/auth/refresh:

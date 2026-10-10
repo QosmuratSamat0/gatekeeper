@@ -1,9 +1,9 @@
 # ADR 0009: Password recovery by email
 
-- Status: Proposed for AUTH-06; requires user approval before implementation.
-- Deciders: User owns product scope; Codex prepares architecture; Gemini proposes an implementation plan.
+- Status: Accepted (approved by User on 2026-10-10 for AUTH-06).
+- Deciders: User approved product scope and recovery design; Codex prepared architecture; Gemini proposed implementation plan.
 - Context: Auth needs a way for an account owner who forgot a password to regain access. The service already has verified email, an injected SMTP sender, Argon2id hashing, sessions and rotating refresh tokens.
-- Proposed decision:
+- Decision:
   1. Provide public request and confirmation endpoints. Return the same generic `202 Accepted` for every syntactically valid request email to reduce account enumeration.
   2. Send reset messages only to active accounts with verified email. Do not change `email_verified` during password recovery.
   3. Use a one-time 32-byte random base64url token; persist only its SHA-256 digest; expire after 30 minutes; allow one current token per account.

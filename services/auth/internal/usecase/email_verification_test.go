@@ -61,6 +61,10 @@ func (m *mockEVEmailSender) SendVerificationEmail(ctx context.Context, recipient
 	return nil
 }
 
+func (m *mockEVEmailSender) SendPasswordResetEmail(ctx context.Context, recipientEmail, rawToken string, expiresAt time.Time) error {
+	return nil
+}
+
 func TestEmailVerificationUsecase_RequestVerification(t *testing.T) {
 	ctx := context.Background()
 

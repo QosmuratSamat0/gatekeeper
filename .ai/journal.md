@@ -1,5 +1,70 @@
 # Journal
 
+### 2026-10-11 03:25 - AUTH-06-IMPL - Password recovery by email implementation, concurrency hardening, and CI workflow update
+- Done: implemented AUTH-06 (Password recovery by email) per ADR 0009 with full concurrency hardening, user manual API verification, and CI updates:
+  1. Migration `000006_create_password_reset_tokens`: bounded storage table `password_reset_tokens` with CASCADE FK, SHA-256 binary token_hash, created_at, expires_at.
+  2. Cryptographic token engine (`token/password_reset.go`): 32 random bytes unpadded base64url string, 32-byte SHA-256 digest. Raw token never stored to disk or logged.
+  3. SMTP delivery adapter (`email/smtp.go`): implemented `SendPasswordResetEmail` in standard library SMTP adapter with STARTTLS and TLS certificate verification.
+  4. Platform configuration (`platform/config/config.go`): added `PASSWORD_RESET_TOKEN_TTL` (default 30m), `PASSWORD_RESET_COOLDOWN` (default 60s), and `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` (default 45s).
+  5. Decoupled consumer-owned ports (`usecase/ports.go`): `PasswordResetTokenGenerator`, `IssuePasswordResetTokenResult`, and `PasswordResetRepository`.
+  6. In-process asynchronous delivery dispatcher (`usecase/password_recovery.go`): channel of 8 slots, pool of 4 workers, dedicated application worker context, non-blocking queue overflow drop, and 45s graceful drain before database pool closure.
+  7. Concurrency hardening in dispatcher: `sync.RWMutex` synchronization preventing sending on closed channel during shutdown; dynamic per-task timeout derived from `cfg.DBQueryTimeout + cfg.SMTPSendTimeout`; worker cancellation and `<-done` wait on drain timeout guaranteeing zero active workers before database pool closure.
+  8. PostgreSQL transactional repository (`repository/postgres/password_reset.go`): canonical lock order, 60s cooldown under lock, atomic token replacement, and single transaction updating Argon2id password hash, deleting token, and revoking all active sessions.
+  9. Public request endpoint (`POST /v1/auth/password-reset/request`): generic 202 `{"status":"accepted"}` with `Cache-Control: no-store` for all syntactically valid emails; IP rate limited (10/min); drops delivery on queue overflow without leaking account state.
+  10. Public confirmation endpoint (`POST /v1/auth/password-reset/confirm`): strict password length validation (8-128 chars); Argon2id hashing computed before database transaction; returns 204 No Content on success; generic 400 `invalid_password_reset_token` for all invalid/expired/consumed/superseded tokens.
+  11. Integration and unit tests: full test coverage across unit tests, concurrent Enqueue/Stop race test, custom timeout test, drain timeout worker wait test, application lifecycle shutdown test, and PostgreSQL integration suites.
+  12. Regenerated Swagger 2.0 API specifications (`api/docs.go`, `api/swagger.json`, `api/swagger.yaml`) with pinned Swag v1.16.4.
+  13. CI workflow update (`.github/workflows/ci.yml`): added `workflow_dispatch` trigger while preserving `push` and `pull_request` triggers on `main`.
+  14. User manual verification: manual API flow tested and confirmed working.
+- Files: services/auth/migrations/000006_create_password_reset_tokens.*, services/auth/internal/domain/errors.go, services/auth/internal/usecase/ports.go, services/auth/internal/platform/token/password_reset*, services/auth/internal/platform/email/smtp*, services/auth/internal/platform/config/config*, services/auth/internal/repository/postgres/password_reset.go, services/auth/internal/usecase/password_recovery*, services/auth/internal/delivery/http/password_recovery*, services/auth/internal/delivery/http/router.go, services/auth/internal/app/wiring.go, services/auth/internal/app/app_test.go, services/auth/api/*, services/auth/.env.example, services/auth/README.md, services/auth/test/integration/password_recovery_postgres_test.go, .github/workflows/ci.yml, .gitignore, .ai/decisions.md, docs/adr/0009-password-recovery.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: ADR 0009 implemented: in-process bounded dispatcher (8 slots, 4 workers) decouples SMTP latency from HTTP response path while residual timing risk is documented; generic 202 on request; single atomic confirmation transaction revokes active sessions and updates credentials; Argon2id hash computed before database transaction; dispatcher Stop cancels workers and awaits their complete exit on drain timeout.
+- Problems: resolved Enqueue/Stop race condition; resolved dispatcher task timeout mismatch; resolved worker termination before database pool closure.
+- Next: Commit AUTH-06, record commit hash, and push to origin main.
+- Commit: pending
+### 2026-10-11 01:45 - AUTH-06-DISPATCHER-RACE-AND-TIMEOUT - Fixed Enqueue/Stop race condition and coordinated dispatcher timeout with configuration
+- Done:
+  1. Fixed race condition in `InProcessPasswordResetDispatcher`:
+     - Synchronized `Enqueue` and `Stop` using `sync.RWMutex`.
+     - In `Enqueue`: acquired read lock (`d.mu.RLock()`), checked `d.closed`, sent via non-blocking `select` (`case d.queue <- task: return true; default: ... return false`), and released read lock (`d.mu.RUnlock()`).
+     - In `Stop`: acquired write lock (`d.mu.Lock()`), set `d.closed = true`, closed `d.queue`, and released write lock (`d.mu.Unlock()`), followed by `workerWg.Wait()` with drain timeout. Eliminates any possibility of sending on a closed channel during shutdown.
+     - Added unit test `TestInProcessPasswordResetDispatcher_ConcurrentEnqueueAndStop`: 20 concurrent producer goroutines generating 4,000 tasks while `Stop` executes concurrently; confirms 0 panics and graceful rejection of subsequent tasks.
+  2. Coordinated dispatcher task timeout with configuration:
+     - Updated `NewInProcessPasswordResetDispatcher` to accept dynamic `taskTimeout ...time.Duration` (defaulting to 13s if omitted or <= 0).
+     - In `services/auth/internal/app/wiring.go`, passed `cfg.DBQueryTimeout + cfg.SMTPSendTimeout` so that the per-task execution context dynamically matches the sum of the configured database query timeout and SMTP send timeout instead of a fixed 13-second limit.
+     - Added unit test `TestInProcessPasswordResetDispatcher_CustomTaskTimeout` verifying that the custom timeout deadline is propagated to worker task contexts.
+  3. Ran test suite and quality gates:
+     - `go test -v ./...` in `services/auth` passes 100%.
+     - `go test -v -run TestInProcessPasswordResetDispatcher` passes 100% (5/5 subtests).
+     - `go vet ./...` clean (0 warnings).
+     - `gofmt -l .` clean (0 unformatted files).
+     - `git diff --check` clean.
+- Files: services/auth/internal/usecase/password_recovery.go, services/auth/internal/usecase/password_recovery_test.go, services/auth/internal/app/wiring.go, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: `sync.RWMutex` protects channel send/close without blocking producers; dynamic task timeout derives from `cfg.DBQueryTimeout + cfg.SMTPSendTimeout` ensuring worker context never cancels before SMTP timeout.
+- Problems: resolved potential panic on closed channel during shutdown race; resolved task cancellation preceding SMTP send timeout.
+- Next: Await user review and confirmation of AUTH-06.
+- Commit: pending
+
+### 2026-10-10 17:55 - AUTH-06-IMPL - Password recovery by email implementation and verification
+- Done: implemented AUTH-06 (Password recovery by email) according to ADR 0009 and the approved plan:
+  1. Migration `000006_create_password_reset_tokens`: bounded storage table `password_reset_tokens` with `account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE`, SHA-256 binary `token_hash bytea NOT NULL UNIQUE`, `created_at`, `expires_at`.
+  2. Cryptographic token engine (`token/password_reset.go`): 32 cryptographically random bytes formatted as unpadded 43-character base64url string. 32-byte SHA-256 binary digest computed and persisted. Raw tokens are never stored to disk or logged.
+  3. Standard-library SMTP platform adapter (`email/smtp.go`): implemented `SendPasswordResetEmail` in standard library SMTP adapter with STARTTLS and TLS certificate verification.
+  4. Platform configuration (`platform/config/config.go`): added `PASSWORD_RESET_TOKEN_TTL` (default 30m), `PASSWORD_RESET_COOLDOWN` (default 60s), and `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` (default 45s).
+  5. Decoupled consumer-owned ports (`usecase/ports.go`): `PasswordResetTokenGenerator`, `IssuePasswordResetTokenResult`, and `PasswordResetRepository` with `IssueResetToken`, `IsTokenActive`, and `ConfirmReset`.
+  6. In-process asynchronous delivery dispatcher (`usecase/password_recovery.go`): channel of 8 slots, pool of 4 workers, dedicated application worker context, non-blocking queue overflow drop with safe logging, and 45s graceful drain before database pool closure.
+  7. PostgreSQL transactional repository (`repository/postgres/password_reset.go`): canonical lock order (`accounts FOR UPDATE -> password_reset_tokens FOR UPDATE -> sessions (ORDER BY id FOR UPDATE)`); enforces 60s cooldown under lock; atomic token replacement; single transaction updates Argon2id password hash, deletes consumed token, and marks all active sessions revoked (`revoked_at = clock_timestamp()`).
+  8. Public request endpoint (`POST /v1/auth/password-reset/request`): generic 202 `{"status":"accepted"}` with `Cache-Control: no-store` for all syntactically valid emails; IP rate limited (10/min); drops delivery on queue overflow without leaking account state.
+  9. Public confirmation endpoint (`POST /v1/auth/password-reset/confirm`): strict password length validation (8-128 chars); Argon2id hashing computed before starting database transaction; returns 204 No Content on success; returns identical generic 400 `invalid_password_reset_token` for all invalid/expired/consumed/superseded tokens.
+  10. Integration tests (`test/integration/password_recovery_postgres_test.go`): comprehensive suites for complete happy path, unknown/inactive/unverified accounts, cooldown race (1 winner, 9 cooldown), concurrent confirmation race (1 winner, 4 invalid), superseded token rejection, and expired token rejection.
+  11. Regenerated Swagger 2.0 API specifications (`api/docs.go`, `api/swagger.json`, `api/swagger.yaml`) with pinned Swag command.
+  12. Tracked config template updated in `services/auth/.env.example` and documentation in `services/auth/README.md`.
+  13. Verified test suites and quality gates: unit tests (100% pass across all auth packages), `gofmt -l .` clean, `go vet ./...` clean, and `git diff --check` clean.
+- Files: services/auth/migrations/000006_create_password_reset_tokens.*, services/auth/internal/domain/errors.go, services/auth/internal/usecase/ports.go, services/auth/internal/platform/token/password_reset*, services/auth/internal/platform/email/smtp*, services/auth/internal/platform/config/config*, services/auth/internal/repository/postgres/password_reset.go, services/auth/internal/usecase/password_recovery*, services/auth/internal/delivery/http/password_recovery*, services/auth/internal/delivery/http/router.go, services/auth/internal/app/wiring.go, services/auth/api/*, services/auth/.env.example, services/auth/README.md, services/auth/test/integration/password_recovery_postgres_test.go, .gitignore, .ai/decisions.md, docs/adr/0009-password-recovery.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: ADR 0009 implemented: in-process bounded dispatcher (8 slots, 4 workers) decouples SMTP latency from HTTP response path while residual timing risk is documented; generic 202 on request; single atomic confirmation transaction revokes active sessions and updates credentials; Argon2id hash computed before database transaction.
+- Problems: none.
+- Next: Await user manual verification of AUTH-06 API flow. Commit and push remain pending per user instruction.
+- Commit: pending
+
 ### 2026-10-10 13:00 - AUTH-05-CANCELLATION-ORDER - Reordered context cancellation check and added unit tests
 - Done: addressed reviewer feedback on request cancellation ordering and verification:
   1. Reordered error checking in `services/auth/internal/delivery/http/email_verification.go`: moved `case errors.Is(err, context.Canceled), errors.Is(r.Context().Err(), context.Canceled): return` directly above `case errors.Is(err, domain.ErrVerificationEmailFailed)`, matching the canonical order in `register.go:114`. If a client aborts during SMTP sending, the server drops response writing without falsely logging an email delivery failure or writing a 503 response.

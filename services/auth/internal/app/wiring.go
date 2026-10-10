@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	deliveryhttp "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http"
 	authmiddleware "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http/middleware"
@@ -146,10 +147,35 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		return nil, fmt.Errorf("initializing logout-all usecase: %w", err)
 	}
 
+	passwordResetTokenMgr := token.NewPasswordResetTokenManager()
+	passwordResetRepo := accountrepo.NewPasswordResetRepository(dbPool, cfg.DBQueryTimeout)
+	dispatcherTaskTimeout := cfg.DBQueryTimeout + cfg.SMTPSendTimeout
+	if dispatcherTaskTimeout <= 0 {
+		dispatcherTaskTimeout = 13 * time.Second
+	}
+	dispatcher := usecase.NewInProcessPasswordResetDispatcher(passwordResetRepo, emailSender, logger, dispatcherTaskTimeout)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	dispatcher.Start(workerCtx, 4)
+
+	requestPasswordResetUC := usecase.NewRequestPasswordResetUsecase(
+		passwordResetRepo,
+		passwordResetTokenMgr,
+		dispatcher,
+		cfg.PasswordResetTokenTTL,
+		cfg.PasswordResetCooldown,
+	)
+	confirmPasswordResetUC := usecase.NewConfirmPasswordResetUsecase(
+		passwordResetRepo,
+		passwordResetTokenMgr,
+		hasher,
+	)
+
 	loginRateLimiter := authmiddleware.NewIPRateLimiter(cfg.LoginRateLimitAttempts, cfg.LoginRateLimitWindow, 10000)
 	refreshRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 	logoutRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 	confirmRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
+	resetReqRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
+	resetConfRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 
 	authAdapter := &tokenAuthAdapter{tokenSvc: tokenSvc}
 
@@ -174,14 +200,30 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		emailVerificationUC,
 		emailVerificationUC,
 		confirmRateLimiter,
+	).WithPasswordRecovery(
+		requestPasswordResetUC,
+		confirmPasswordResetUC,
+		resetReqRateLimiter,
+		resetConfRateLimiter,
 	)
 	router := handler.Routes()
 
-	// Register database pool closure as a cleanup callback.
-	application := New(cfg, logger, router, func() {
-		logger.Info("closing database connection pool")
-		dbPool.Close()
-	})
+	// Register dispatcher drain and database pool closure as cleanup callbacks.
+	application := New(cfg, logger, router,
+		func() {
+			logger.Info("draining password reset delivery dispatcher")
+			drainTimeout := cfg.PasswordResetQueueDrainTimeout
+			if drainTimeout <= 0 {
+				drainTimeout = 45 * time.Second
+			}
+			dispatcher.Stop(drainTimeout)
+			workerCancel()
+		},
+		func() {
+			logger.Info("closing database connection pool")
+			dbPool.Close()
+		},
+	)
 
 	return application, nil
 }

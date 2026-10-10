@@ -66,6 +66,16 @@ type EmailVerificationConfirmService interface {
 	ConfirmVerification(ctx context.Context, rawToken string) error
 }
 
+// PasswordResetRequestService defines the password reset request usecase contract.
+type PasswordResetRequestService interface {
+	Execute(ctx context.Context, input usecase.RequestPasswordResetInput) error
+}
+
+// PasswordResetConfirmService defines the password reset confirm usecase contract.
+type PasswordResetConfirmService interface {
+	Execute(ctx context.Context, input usecase.ConfirmPasswordResetInput) error
+}
+
 // Handler holds HTTP dependencies and endpoints.
 type Handler struct {
 	logger                  *slog.Logger
@@ -86,6 +96,10 @@ type Handler struct {
 	emailVerificationReqUC  EmailVerificationRequestService
 	emailVerificationConfUC EmailVerificationConfirmService
 	confirmLimiter          *authmiddleware.IPRateLimiter
+	requestResetUC          PasswordResetRequestService
+	confirmResetUC          PasswordResetConfirmService
+	resetReqLimiter         *authmiddleware.IPRateLimiter
+	resetConfLimiter        *authmiddleware.IPRateLimiter
 }
 
 // NewHandler creates a new Handler instance with all injected usecases and platform adapters.
@@ -140,6 +154,20 @@ func (h *Handler) WithEmailVerification(
 	h.emailVerificationReqUC = requestUC
 	h.emailVerificationConfUC = confirmUC
 	h.confirmLimiter = confirmLimiter
+	return h
+}
+
+// WithPasswordRecovery configures password reset request and confirm use cases on the Handler.
+func (h *Handler) WithPasswordRecovery(
+	requestUC PasswordResetRequestService,
+	confirmUC PasswordResetConfirmService,
+	reqLimiter *authmiddleware.IPRateLimiter,
+	confLimiter *authmiddleware.IPRateLimiter,
+) *Handler {
+	h.requestResetUC = requestUC
+	h.confirmResetUC = confirmUC
+	h.resetReqLimiter = reqLimiter
+	h.resetConfLimiter = confLimiter
 	return h
 }
 
@@ -214,6 +242,26 @@ func (h *Handler) Routes() http.Handler {
 				Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
 		} else {
 			r.Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
+		}
+	}
+
+	// Public password reset request endpoint with per-IP rate limiting
+	if h.requestResetUC != nil {
+		if h.resetReqLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.resetReqLimiter, "Too many password reset requests. Please try again later.")).
+				Post("/v1/auth/password-reset/request", h.RequestPasswordReset)
+		} else {
+			r.Post("/v1/auth/password-reset/request", h.RequestPasswordReset)
+		}
+	}
+
+	// Public password reset confirm endpoint with per-IP rate limiting
+	if h.confirmResetUC != nil {
+		if h.resetConfLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.resetConfLimiter, "Too many password reset attempts. Please try again later.")).
+				Post("/v1/auth/password-reset/confirm", h.ConfirmPasswordReset)
+		} else {
+			r.Post("/v1/auth/password-reset/confirm", h.ConfirmPasswordReset)
 		}
 	}
 

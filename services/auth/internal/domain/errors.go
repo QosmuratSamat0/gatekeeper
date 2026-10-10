@@ -63,4 +63,9 @@ var (
 	// account or token persistence. This is mapped to 503 Service Unavailable so the
 	// caller knows the partial state is recoverable via resend.
 	ErrVerificationEmailFailed = errors.New("failed to send verification email")
+
+	// ErrInvalidPasswordResetToken indicates that a password reset token is malformed,
+	// expired, consumed, superseded, or unknown. Using a single generic error prevents
+	// account status probing or token brute-forcing side channels.
+	ErrInvalidPasswordResetToken = errors.New("invalid or expired password reset token")
 )

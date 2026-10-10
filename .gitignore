@@ -27,5 +27,7 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Local signing keys must never be committed to source control
+# Local signing keys and development certificates must never be committed to source control
 /services/auth/keys/
+/services/auth/certs/
+/tmp/

@@ -154,6 +154,15 @@ func TestConfigLoad(t *testing.T) {
 		if cfg.EmailVerificationCooldown != 60*time.Second {
 			t.Errorf("expected 60s, got %v", cfg.EmailVerificationCooldown)
 		}
+		if cfg.PasswordResetTokenTTL != 30*time.Minute {
+			t.Errorf("expected 30m, got %v", cfg.PasswordResetTokenTTL)
+		}
+		if cfg.PasswordResetCooldown != 60*time.Second {
+			t.Errorf("expected 60s, got %v", cfg.PasswordResetCooldown)
+		}
+		if cfg.PasswordResetQueueDrainTimeout != 45*time.Second {
+			t.Errorf("expected 45s, got %v", cfg.PasswordResetQueueDrainTimeout)
+		}
 	})
 
 	t.Run("rejects invalid SMTP_PORT and TTL durations", func(t *testing.T) {
@@ -178,6 +187,27 @@ func TestConfigLoad(t *testing.T) {
 		_, err = config.Load()
 		if err == nil {
 			t.Error("expected error for EMAIL_VERIFICATION_COOLDOWN < 10s")
+		}
+
+		t.Setenv("EMAIL_VERIFICATION_COOLDOWN", "60s")
+		t.Setenv("PASSWORD_RESET_TOKEN_TTL", "1m") // < 5m
+		_, err = config.Load()
+		if err == nil {
+			t.Error("expected error for PASSWORD_RESET_TOKEN_TTL < 5m")
+		}
+
+		t.Setenv("PASSWORD_RESET_TOKEN_TTL", "30m")
+		t.Setenv("PASSWORD_RESET_COOLDOWN", "2s") // < 10s
+		_, err = config.Load()
+		if err == nil {
+			t.Error("expected error for PASSWORD_RESET_COOLDOWN < 10s")
+		}
+
+		t.Setenv("PASSWORD_RESET_COOLDOWN", "60s")
+		t.Setenv("PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT", "1s") // < 5s
+		_, err = config.Load()
+		if err == nil {
+			t.Error("expected error for PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT < 5s")
 		}
 	})
 }

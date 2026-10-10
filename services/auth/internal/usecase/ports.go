@@ -145,6 +145,7 @@ type RefreshTokenManager interface {
 // Delivery must be bounded by context and execute after transaction commits.
 type EmailSender interface {
 	SendVerificationEmail(ctx context.Context, recipientEmail string, rawToken string, expiresAt time.Time) error
+	SendPasswordResetEmail(ctx context.Context, recipientEmail string, rawToken string, expiresAt time.Time) error
 }
 
 // EmailVerificationTokenGenerator generates and validates cryptographically secure email verification tokens.
@@ -172,4 +173,32 @@ type EmailVerificationRepository interface {
 	// re-verifies active status, email_verified=false, and expiration (clock_timestamp() < expires_at)
 	// for the exact token_hash, marks email_verified=true, and deletes the token.
 	ConfirmToken(ctx context.Context, tokenHash []byte) error
+}
+
+// PasswordResetTokenGenerator generates and validates cryptographically secure password reset tokens.
+type PasswordResetTokenGenerator interface {
+	Generate() (rawToken string, hash []byte, err error)
+	ValidateAndHash(rawToken string) (hash []byte, err error)
+}
+
+// IssuePasswordResetTokenResult represents the outcome of requesting a password reset token.
+type IssuePasswordResetTokenResult struct {
+	Eligible       bool
+	RecipientEmail string
+	CooldownActive bool
+	ExpiresAt      time.Time
+}
+
+// PasswordResetRepository defines atomic storage operations for password reset tokens, accounts, and session revocation.
+type PasswordResetRepository interface {
+	// IssueResetToken atomically locks the account row by normalized email, checks active status and email verification.
+	// If eligible and cooldown has elapsed, it inserts/updates the single reset token for the account.
+	IssueResetToken(ctx context.Context, email string, tokenHash []byte, ttl time.Duration, cooldown time.Duration) (IssuePasswordResetTokenResult, error)
+
+	// IsTokenActive checks whether the given tokenHash is still valid, unexpired, and associated with an active, verified account.
+	IsTokenActive(ctx context.Context, tokenHash []byte) (bool, error)
+
+	// ConfirmReset verifies the presented token hash, updates the account password hash, deletes the consumed token,
+	// and atomically revokes all unrevoked sessions for the account in a single transaction.
+	ConfirmReset(ctx context.Context, tokenHash []byte, newPasswordHash string) error
 }

@@ -442,6 +442,143 @@
                 }
             }
         },
+        "/v1/auth/password-reset/confirm": {
+            "post": {
+                "description": "Verifies a one-time password reset token, updates the Argon2id password hash, and revokes all active sessions for the account.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Confirm password reset",
+                "parameters": [
+                    {
+                        "description": "Reset token and new password",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.passwordResetConfirmBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Password updated and all sessions revoked successfully"
+                    },
+                    "400": {
+                        "description": "Invalid token or password policy violation",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body exceeds limit",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many password reset attempts",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service temporarily unavailable, please retry",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/password-reset/request": {
+            "post": {
+                "description": "Accepts an email and asynchronously dispatches a one-time password reset link if the account exists, is active, and verified.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request password reset",
+                "parameters": [
+                    {
+                        "description": "Email for password recovery",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.passwordResetRequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Reset request accepted",
+                        "schema": {
+                            "$ref": "#/definitions/http.passwordResetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid JSON body or invalid email format",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body exceeds limit",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many password reset requests",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service temporarily unavailable, please retry",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/refresh": {
             "post": {
                 "description": "Rotates a valid unconsumed refresh token, invalidates the old token, and issues a new access JWT and successor refresh token. If a previously consumed token is replayed, the session family is immediately revoked.",
@@ -926,6 +1063,48 @@
             "properties": {
                 "account": {
                     "$ref": "#/definitions/http.accountResponse"
+                }
+            }
+        },
+        "http.passwordResetConfirmBody": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "token"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "example": "newSecurePassword123!"
+                },
+                "token": {
+                    "type": "string",
+                    "example": "_y8k5G3m7Q9zP4rT1wX6sV2bN8cM0kL5jH3dF6gJ9p"
+                }
+            }
+        },
+        "http.passwordResetRequestBody": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "example": "user@example.com"
+                }
+            }
+        },
+        "http.passwordResetResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "accepted"
                 }
             }
         },

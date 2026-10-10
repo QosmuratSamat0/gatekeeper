@@ -13,6 +13,7 @@ import (
 
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/app"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/config"
+	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/usecase"
 )
 
 func TestApp_LifecycleCleanupOnShutdown(t *testing.T) {
@@ -189,5 +190,99 @@ func TestApp_LifecycleForcedCloseOnShutdownTimeout(t *testing.T) {
 	// Database cleanup must still run even when shutdown timed out
 	if !cleanedUp.Load() {
 		t.Error("expected cleanup callback to be called after forced shutdown")
+	}
+}
+
+type mockAppPasswordResetRepo struct {
+	isTokenActiveFn func(ctx context.Context, tokenHash []byte) (bool, error)
+}
+
+func (m *mockAppPasswordResetRepo) IssueResetToken(ctx context.Context, email string, tokenHash []byte, ttl, cooldown time.Duration) (usecase.IssuePasswordResetTokenResult, error) {
+	return usecase.IssuePasswordResetTokenResult{}, nil
+}
+
+func (m *mockAppPasswordResetRepo) IsTokenActive(ctx context.Context, tokenHash []byte) (bool, error) {
+	if m.isTokenActiveFn != nil {
+		return m.isTokenActiveFn(ctx, tokenHash)
+	}
+	return false, nil
+}
+
+func (m *mockAppPasswordResetRepo) ConfirmReset(ctx context.Context, tokenHash []byte, newPasswordHash string) error {
+	return nil
+}
+
+func TestApp_LifecycleDispatcherDrainTimeoutWorkersFinishBeforePoolClose(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.Config{HTTPAddr: "127.0.0.1:0"}
+
+	var poolClosed atomic.Bool
+	var activeWorkers atomic.Int32
+	var poolAccessAfterClose atomic.Bool
+
+	repo := &mockAppPasswordResetRepo{
+		isTokenActiveFn: func(ctx context.Context, tokenHash []byte) (bool, error) {
+			activeWorkers.Add(1)
+			defer activeWorkers.Add(-1)
+
+			if poolClosed.Load() {
+				poolAccessAfterClose.Store(true)
+			}
+
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(2 * time.Second):
+				return true, nil
+			}
+		},
+	}
+
+	dispatcher := usecase.NewInProcessPasswordResetDispatcher(repo, nil, logger)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	dispatcher.Start(workerCtx, 2)
+
+	dispatcher.Enqueue(usecase.PasswordResetDeliveryTask{
+		RecipientEmail: "test@example.com",
+		TokenHash:      []byte("hash-32-bytes-test-hash-12345678"),
+		ExpiresAt:      time.Now().Add(30 * time.Minute),
+	})
+
+	// Mimic wiring.go cleanup callbacks:
+	cleanup1 := func() {
+		drainTimeout := 20 * time.Millisecond
+		dispatcher.Stop(drainTimeout)
+		workerCancel()
+	}
+	cleanup2 := func() {
+		poolClosed.Store(true)
+	}
+
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	application := app.New(cfg, logger, dummyHandler, cleanup1, cleanup2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- application.Run(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel() // trigger shutdown
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("unexpected run error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for application to exit")
+	}
+
+	if poolAccessAfterClose.Load() {
+		t.Fatal("worker accessed database pool after pool closure")
+	}
+	if active := activeWorkers.Load(); active != 0 {
+		t.Fatalf("expected 0 active workers after shutdown, got %d", active)
 	}
 }
