@@ -1,5 +1,88 @@
 # Journal
 
+### 2026-10-10 13:00 - AUTH-05-CANCELLATION-ORDER - Reordered context cancellation check and added unit tests
+- Done: addressed reviewer feedback on request cancellation ordering and verification:
+  1. Reordered error checking in `services/auth/internal/delivery/http/email_verification.go`: moved `case errors.Is(err, context.Canceled), errors.Is(r.Context().Err(), context.Canceled): return` directly above `case errors.Is(err, domain.ErrVerificationEmailFailed)`, matching the canonical order in `register.go:114`. If a client aborts during SMTP sending, the server drops response writing without falsely logging an email delivery failure or writing a 503 response.
+  2. Added unit tests in `services/auth/internal/delivery/http/email_verification_test.go` verifying that client-side cancellation during email transmission and direct usecase `context.Canceled` return without writing response bodies or returning 503.
+  3. Verified token canonical encoding terminology: the unpadded 43-character base64url verification token is strictly validated and confirmed canonical.
+  4. Executed full verification suite:
+     - Unit tests (`services/auth/internal/...`): 100% pass.
+     - `gofmt -l .`: clean (0 unformatted files).
+     - `go vet ./...`: clean.
+     - Real PostgreSQL 16 integration tests (`RUN_INTEGRATION_TESTS=true`): 22/22 suites pass.
+     - `golangci-lint run` (Docker v2.14.0): 0 issues.
+     - Linux race detector (`-race` in Docker `golang:1.26-alpine`): 100% pass, 0 data races.
+     - Docker build `gatekeeper-auth:ci`: 100% success.
+     - Trivy security scan (`aquasec/trivy:latest`): 0 vulnerabilities (0 HIGH, 0 CRITICAL), 0 secrets.
+     - `git diff --check`: clean.
+- Files: services/auth/internal/delivery/http/email_verification.go, services/auth/internal/delivery/http/email_verification_test.go, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: handler prioritizes context cancellation before infrastructure errors to prevent spurious failure logs on client aborts.
+- Problems: none.
+- Next: report to user and Codex for final acceptance. Commit and push remain pending per user instruction.
+- Commit: pending
+
+### 2026-10-09 23:55 - AUTH-05-IMPL - Email verification tokens, SMTP adapter, concurrency and full verification
+- Done: implemented AUTH-05 (Email Verification) according to specification, approved plan, and reviewer requirements:
+  1. Migration `000005_create_email_verification_tokens`: bounded storage table with `account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE`, SHA-256 binary `token_hash bytea NOT NULL UNIQUE`, and `expires_at TIMESTAMPTZ NOT NULL`. Redundant secondary index omitted per plan review.
+  2. Cryptographic token engine (`token/email_verification.go`): 32 cryptographically random bytes formatted as unpadded 43-character base64url string. 32-byte SHA-256 binary digest computed and persisted. Raw tokens are never stored to disk or logged.
+  3. Standard-library SMTP platform adapter (`email/smtp.go`): mandatory STARTTLS with verified TLS certificates (`InsecureSkipVerify: false`), plain auth credentials sent strictly after TLS handshake, 10s socket deadline and active context watcher to prevent hanging on unresponsive mail servers.
+  4. Consumer-owned usecase ports (`usecase/ports.go`): `EmailSender`, `EmailVerificationTokenGenerator`, `IssueVerificationTokenResult`, and `EmailVerificationRepository`.
+  5. Concurrency & row-locking repository (`postgres/email_verification.go`): enforces canonical row lock order (account `FOR UPDATE` first, then token row lock) preventing deadlocks; atomic consumption deletes token and updates `email_verified = true`; 60s cooldown enforced under row lock across replicas; re-checks exact `token_hash` after acquiring account lock to prevent race with concurrent resend; strict `clock_timestamp() < expires_at` boundary.
+  6. Post-commit registration email delivery (`usecase/register.go`): registration response DTO unchanged; SMTP delivery failure returns 503 `service_unavailable` while keeping the newly registered account created and active (`email_verified = false`), recoverable via authenticated resend.
+  7. Public confirmation (`POST /v1/auth/email/verification/confirm`): IP rate limited (10/min); returns 204 on success; returns identical 400 `invalid_verification_token` with standard error envelope (`code`, `message`, `request_id`) across all invalid token cases (expired, superseded, wrong format, consumed, unknown); database errors and timeouts preserved as 500/503 (never masked as 400).
+  8. Authenticated resend (`POST /v1/auth/email/verification/request`): requires active Bearer session; derives account ID from verified JWT session; accepts empty body only (400 if non-empty, 413 if > 4 KiB); returns 202 `{"status":"accepted"}`; enforces DB-backed 60s cooldown; already-verified accounts safely return 202 without issuing tokens or emails.
+  9. Regenerated Swagger 2.0 API specifications (`api/docs.go`, `api/swagger.json`, `api/swagger.yaml`) with pinned command.
+  10. Unit tests across all packages pass 100%.
+  11. Real PostgreSQL 16 integration tests (`email_verification_postgres_test.go`): verifies `pg_locks` lock wait during confirmation vs. resend race, 10 concurrent confirmation race (1 winner, 9 invalid), cooldown replacement, and boundary expiration. All 22 test suites pass.
+  12. Executed full verification pipeline:
+      - `gofmt -l .`: clean (0 unformatted files).
+      - `go vet ./...`: clean.
+      - `golangci-lint run` (Docker v2.14.0): 0 issues.
+      - Linux race detector (`-race` in Docker `golang:1.26-alpine` with `build-base`): 100% pass, 0 data races.
+      - Docker build `gatekeeper-auth:ci`: 100% success (updated base image to Go 1.26.9).
+      - Trivy security scan (`aquasec/trivy:latest`): 0 vulnerabilities (0 HIGH, 0 CRITICAL), 0 secrets.
+- Files: services/auth/migrations/*, internal/domain/errors.go, internal/usecase/ports.go, internal/platform/token/*, internal/platform/email/*, internal/platform/config/*, internal/repository/postgres/email_verification.go, internal/usecase/register.go, internal/usecase/email_verification.go, internal/delivery/http/email_verification.go, internal/delivery/http/router.go, internal/app/wiring.go, api/*, test/integration/email_verification_postgres_test.go, docs/adr/0008-email-verification.md, .ai/decisions.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: ADR 0008 marked Accepted; bounded 1-token-per-account storage with SHA-256 binary hash; 60s DB-enforced resend cooldown; STARTTLS with verified TLS certificates.
+- Problems: Go 1.26.8 in builder image triggered Trivy HIGH CVEs, resolved by pulling updated `golang:1.26-alpine` (Go 1.26.9), achieving 0 vulnerabilities.
+- Next: User manual verification of AUTH-05 API flow. Commit and push remain pending per user instruction.
+- Commit: pending
+
+### 2026-10-08 21:55 - AUTH-04-VERIFICATION - Concurrency overlap, pure production code, and full Docker verification suite
+- Done: completed the remaining AUTH-04 verification requirements:
+  1. Synchronized concurrent tests to genuinely overlap inside PostgreSQL transactions without sleeps: `raceCoordinator` holds the winning transaction immediately before commit, the second transaction begins and encounters PostgreSQL row lock wait, verified via `pg_locks WHERE NOT granted` polling with bounded timeout, then the first transaction commits. Tested both execution orders for refresh vs. logout-all, refresh vs. single-revoke, and login vs. logout-all.
+  2. Moved transaction rollback fault injection into a test-only wrapper (`txInterceptorDB` and `wrappedTx` around `PgxPoolExecutor` and `pgx.Tx`), removing `SetTestBeforeCommitHook` and mutable hook fields completely from production code.
+  3. Verified in-flight mutation rollback in PostgreSQL: uncommitted `UPDATE sessions SET revoked_at = clock_timestamp()` verified active inside transaction, aborted prior to commit, and verified clean outside transaction (`revoked_at IS NULL`).
+  4. Corrected architectural documentation: refresh (`RotateRefreshToken`) preserves session ID, creating a new refresh token family member; logout-all (`RevokeAllSessions`) revokes all unrevoked sessions including the caller itself.
+  5. Cleaned up untracked `.cache/` folder and used the tracked/ignored `.gocache/` path.
+  6. Successfully executed the complete verification suite against live Docker engine and PostgreSQL 16:
+     - PostgreSQL integration tests with `RUN_INTEGRATION_TESTS=true`: 100% PASS across all integration suites.
+     - `golangci-lint run` (Docker `golangci/golangci-lint:latest`): 0 issues (resolved staticcheck SA4010, QF1008, QF1001).
+     - Linux race detector (`-race` in Docker `golang:1.26-alpine`): 100% PASS, 0 data races.
+     - Docker build `gatekeeper-auth:ci`: 100% success.
+     - Trivy security scan (`aquasec/trivy:latest`): 0 vulnerabilities (0 HIGH, 0 CRITICAL), 0 secrets.
+     - `gofmt -l .`: 0 unformatted files.
+     - `go vet ./...`: 0 warnings or errors.
+- Files: services/auth/internal/repository/postgres/session.go, services/auth/test/integration/session_management_postgres_test.go, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: test-only transaction interceptors prevent test code leakage into production structs; `pg_locks` polling provides deterministic lock wait assertion without sleeps.
+- Problems: staticcheck SA4010 unused append slice resolved in `session.go`.
+- Next: report to user and Codex for final acceptance. Commit and push remain pending per user instruction.
+- Commit: pending
+
+### 2026-10-07 23:15 - AUTH-04-FIXES - Applied review fixes for session management
+- Done: applied all corrections required for AUTH-04 acceptance:
+  1. Regenerated all Swagger artifacts, including `api/docs.go`, `api/swagger.json`, and `api/swagger.yaml`, using the pinned Swag command (`swag init -g cmd/api/main.go -d ./ --parseInternal -o ./api`) without `--ot json,yaml`.
+  2. Normalized validated UUIDs (`strings.ToLower`) before comparisons, ordering, and map lookups across HTTP, usecase, and PostgreSQL repository layers; added PostgreSQL integration test for uppercase target UUID revocation.
+  3. Replaced fake refresh race with real refresh token rotation; added tests for refresh vs. single-revoke and login vs. logout-all, exercising both transaction orders with controlled channel synchronization.
+  4. Tested transaction rollback after database mutations have actually occurred in PostgreSQL using a pre-commit hook that verifies `revoked_at IS NOT NULL` inside the open transaction before injecting failure, then asserts complete rollback outside the transaction.
+  5. Implemented `url.ParseQuery` on `r.URL.RawQuery` in `ListSessions`, rejecting parse errors and explicitly empty `limit` or `cursor` parameters with 400 `invalid_request`.
+  6. Separated session management operations into a narrow `SessionManagementRepository` interface in `usecase/ports.go`, adhering to the Interface Segregation Principle and keeping `SessionRepository` focused.
+  7. Ran full verification: unit tests (100% pass), `gofmt -l .` (0 files), `go vet ./...` (clean), Swagger generation (fresh). Documented executed and skipped environment checks.
+- Files: ports.go, session_management.go, session.go, sessions.go, sessions_test.go, cursor.go, docs.go, swagger.json, swagger.yaml, session_management_postgres_test.go.
+- Decisions: narrow SessionManagementRepository decouples usecases; post-mutation hook verifies true transaction rollback; RawQuery parser strictly rejects malformed and empty parameters.
+- Problems: none.
+- Next: report to user and Codex for final acceptance. Commit and push remain pending per user instruction.
+- Commit: pending
+
 ### 2026-10-07 13:25 - AUTH-03-REVIEW-FIXES - Remediation of Codex review findings
 - Done: addressed all 5 review remarks from Codex on AUTH-03:
   1. Decoupled usecases from concrete platform/token adapter: defined consumer-owned ports RefreshTokenGenerator, RefreshTokenValidator, and RefreshTokenManager in usecase/ports.go; eliminated platform/token imports from login.go, refresh.go, and logout.go; wired token.NewRefreshTokenManager() via app/wiring.go.
@@ -294,3 +377,28 @@
 - Problems: none.
 - Next: push both commits to origin/main, verify remote and CI; Gemini prepares AUTH-04 plan.
 - Commit: implementation f226159; record commit pending.
+
+### 2026-10-09 - AUTH-04-ACCEPT-AUTH-05-BRIEF - Accept manual verification and prepare email verification
+- Done: Recorded the user's manual AUTH-04 API verification and prepared AUTH-05 contracts, acceptance checks, a proposed token/SMTP policy, and its threat model.
+- Files: .ai/tasks/current.md, .ai/tasks/auth-05.md, .ai/architecture/auth-access.md, .ai/decisions.md, .ai/prompts/auth-05-threat-model.md, docs/adr/0008-email-verification.md.
+- Decisions: AUTH-05 design is proposed for Gemini plan review. Active accounts with unverified email remain able to log in; only token digests are stored; SMTP must require validated STARTTLS.
+- Problems: None. The first session-delete request used an unexpanded Postman variable and returned 400; the corrected UUID request returned 204.
+- Next: Gemini presents the AUTH-05 implementation plan for Codex review. No code, commit, push or deployment authorized.
+- Commit: pending.
+
+### 2026-10-10 - AUTH-05-ACCEPT-AUTH-06-BRIEF - Accept email verification and prepare password recovery
+- Done: Recorded the user's successful manual AUTH-05 test and prepared the proposed AUTH-06 password recovery contract, ADR 0009, and threat-model checklist.
+- Files: .ai/tasks/current.md, .ai/tasks/auth-06.md, .ai/architecture/auth-access.md, .ai/decisions.md, .ai/journal.md, .ai/prompts/auth-06-threat-model.md, docs/adr/0009-password-recovery.md.
+- Decisions: AUTH-06 is a proposal, not implementation approval. Proposed policy uses verified email, generic request responses, one-time digest-only tokens, and atomic password update plus all-session revocation.
+- Problems: AUTH-05 implementation files remain uncommitted; no Git delivery was performed.
+- Next: User reviews AUTH-06 design; after AUTH-05 delivery, Gemini presents an implementation plan for Codex review.
+- Commit: pending.
+
+### 2026-10-10 - AUTH04-AUTH05-PRECOMMIT - Verify accepted Auth changes before commit
+- Done: Prepared the accepted AUTH-04 session-management and AUTH-05 email-verification changes for commit after the user's manual AUTH-05 confirmation.
+- Files: Auth session/email implementation, migrations, tests, generated Swagger, ADRs 0007-0008, and related .ai documentation. AUTH-06 remains a proposal.
+- Decisions: Excluded local Mailpit certificates and temporary files. No push requested.
+- Verification: `go test ./...`, `go build ./...`, `go vet ./...`, `gofmt -l .`, and `git diff --check` passed. Race tests could not run because CGO is disabled and no C compiler is installed; golangci-lint is unavailable; Docker daemon is unavailable. Prior AUTH-04/AUTH-05 PostgreSQL, Linux race, lint and Docker results are recorded above but were not rerun in this environment.
+- Problems: None in the checks that ran.
+- Next: Review staged paths, commit accepted AUTH-04/AUTH-05 changes, then record the hash in a documentation commit.
+- Commit: pending.

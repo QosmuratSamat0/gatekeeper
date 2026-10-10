@@ -39,8 +39,10 @@ all I/O and enforce timeouts. Split files when useful, not as empty scaffolding.
 - Current implementation uses generated api/{docs.go,swagger.json,swagger.yaml}
   from Swag annotations (Swagger 2.0), superseding the layout's openapi.yaml.
 - Implemented and accepted: AUTH-01 registration, AUTH-02 login/access JWT/session/logout/JWKS, and AUTH-03 JSON refresh rotation/reuse detection.
-- Next brief: [AUTH-04](../tasks/auth-04.md), own session listing, targeted revocation and logout-all; implementation pending plan approval.
+- Implemented and accepted: AUTH-04 own session listing, targeted revocation, and logout-all.
 - AUTH-03 stores only refresh digests, retains consumed records, and uses a stable session family with an absolute expiry.
+- Email verification is implemented and accepted in AUTH-05 using one-time random tokens stored only as digests and sent through a STARTTLS-protected SMTP adapter (ADR 0008). Unverified active accounts continue to be allowed to log in until a separate policy change is approved.
+- Password recovery is proposed for AUTH-06: verified accounts request a one-time email token; confirmation changes the password and revokes all sessions atomically. See proposed ADR 0009; this remains a design proposal until user approval.
 - Domain: account, session, domain errors.
 - Usecases: register, login, refresh, logout, password reset.
 - Storage: accounts, sessions, password reset and email verification tokens.
@@ -90,5 +92,4 @@ shutdown. Cache authorization decisions only with an explicit revocation policy.
   code review and verification reports. Codex does not write implementation code
   unless the user changes this arrangement.
 - Gemini writes implementation code and runs the required checks.
-- Next: inspect the existing Auth skeleton and prepare one concrete, bounded
-  Auth implementation task for Gemini. This document does not start that task.
+- AUTH-06 password recovery is the next proposed Auth task; see [tasks/auth-06.md](../tasks/auth-06.md). Its delivery design remains under review before implementation.

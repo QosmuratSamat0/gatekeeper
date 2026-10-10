@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,7 @@ import (
 type PgxPoolExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
@@ -528,4 +530,460 @@ func (r *SessionRepository) RotateRefreshToken(
 		ExpiresIn:        expiresIn,
 		RefreshExpiresIn: refreshExpiresIn,
 	}, nil
+}
+
+// ListActiveSessions lists active sessions owned by accountID with keyset pagination.
+// It verifies in a single query that the caller session exists, is owned, is unrevoked,
+// is unexpired, and the owning account is active, using a single timestamp for consistent evaluation.
+func (r *SessionRepository) ListActiveSessions(
+	ctx context.Context,
+	accountID string,
+	callerSessionID string,
+	filter usecase.SessionListFilter,
+) (usecase.SessionListPage, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	accountID = strings.ToLower(accountID)
+	callerSessionID = strings.ToLower(callerSessionID)
+
+	hasCursor := filter.Cursor != nil
+	var cursorCreatedAt any = nil
+	var cursorID any = nil
+	if hasCursor {
+		cursorCreatedAt = filter.Cursor.CreatedAt
+		cursorID = strings.ToLower(filter.Cursor.ID)
+	}
+	fetchLimit := filter.Limit + 1
+
+	// Single statement with CTEs:
+	// - now_t calculates one reference timestamp for all expiry comparisons.
+	// - caller checks the caller's session existence, account status, and expiry.
+	// - page selects active unrevoked sessions matching keyset criteria.
+	// - The outer SELECT guarantees deterministic ordering and distinguishes an invalid caller from an empty page.
+	query := `
+		WITH now_t AS (
+			SELECT clock_timestamp() AS now
+		),
+		caller AS (
+			SELECT
+				s.id,
+				s.expires_at,
+				s.revoked_at,
+				a.status AS account_status
+			FROM sessions s
+			JOIN accounts a ON s.account_id = a.id
+			WHERE s.id = $1 AND s.account_id = $2
+		),
+		page AS (
+			SELECT s.id, s.created_at, s.expires_at
+			FROM sessions s, now_t
+			WHERE s.account_id = $2
+			  AND s.revoked_at IS NULL
+			  AND s.expires_at > now_t.now
+			  AND (
+				  $3::boolean = false
+				  OR (s.created_at < $4 OR (s.created_at = $4 AND s.id < $5))
+			  )
+			ORDER BY s.created_at DESC, s.id DESC
+			LIMIT $6
+		)
+		SELECT
+			EXISTS(SELECT 1 FROM caller) AS caller_found,
+			COALESCE((SELECT account_status = 'active' FROM caller), false) AS account_active,
+			COALESCE((SELECT revoked_at IS NULL FROM caller), false) AS caller_unrevoked,
+			COALESCE((SELECT expires_at > (SELECT now FROM now_t) FROM caller), false) AS caller_unexpired,
+			p.id,
+			p.created_at,
+			p.expires_at
+		FROM (SELECT 1) _
+		LEFT JOIN page p ON (
+			EXISTS(SELECT 1 FROM caller)
+			AND (SELECT account_status = 'active' FROM caller)
+			AND (SELECT revoked_at IS NULL FROM caller)
+			AND (SELECT expires_at > (SELECT now FROM now_t) FROM caller)
+		)
+		ORDER BY p.created_at DESC NULLS LAST, p.id DESC NULLS LAST;
+	`
+
+	rows, err := r.db.Query(queryCtx, query, callerSessionID, accountID, hasCursor, cursorCreatedAt, cursorID, fetchLimit)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return usecase.SessionListPage{}, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return usecase.SessionListPage{}, fmt.Errorf("querying active sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []usecase.SessionSummary
+	firstRow := true
+
+	for rows.Next() {
+		var (
+			callerFound     bool
+			accountActive   bool
+			callerUnrevoked bool
+			callerUnexpired bool
+			sessionID       *string
+			createdAt       *time.Time
+			expiresAt       *time.Time
+		)
+
+		err := rows.Scan(
+			&callerFound,
+			&accountActive,
+			&callerUnrevoked,
+			&callerUnexpired,
+			&sessionID,
+			&createdAt,
+			&expiresAt,
+		)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return usecase.SessionListPage{}, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return usecase.SessionListPage{}, fmt.Errorf("scanning session row: %w", err)
+		}
+
+		if firstRow {
+			firstRow = false
+			if !callerFound {
+				return usecase.SessionListPage{}, domain.ErrCallerSessionNotFound
+			}
+			if !accountActive {
+				return usecase.SessionListPage{}, domain.ErrInvalidCredentials
+			}
+			if !callerUnrevoked {
+				return usecase.SessionListPage{}, domain.ErrSessionRevoked
+			}
+			if !callerUnexpired {
+				return usecase.SessionListPage{}, domain.ErrSessionExpired
+			}
+		}
+
+		if sessionID != nil && createdAt != nil && expiresAt != nil {
+			sessions = append(sessions, usecase.SessionSummary{
+				ID:        *sessionID,
+				CreatedAt: *createdAt,
+				ExpiresAt: *expiresAt,
+				IsCurrent: strings.ToLower(*sessionID) == callerSessionID,
+			})
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return usecase.SessionListPage{}, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return usecase.SessionListPage{}, fmt.Errorf("iterating session rows: %w", err)
+	}
+
+	if firstRow {
+		return usecase.SessionListPage{}, domain.ErrCallerSessionNotFound
+	}
+
+	var nextCursor *usecase.SessionCursor
+	if len(sessions) > filter.Limit {
+		lastItem := sessions[filter.Limit-1]
+		nextCursor = &usecase.SessionCursor{
+			CreatedAt: lastItem.CreatedAt,
+			ID:        lastItem.ID,
+		}
+		sessions = sessions[:filter.Limit]
+	}
+
+	if sessions == nil {
+		sessions = []usecase.SessionSummary{}
+	}
+
+	return usecase.SessionListPage{
+		Sessions:   sessions,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+// RevokeSessionTarget atomically revokes a target session owned by accountID.
+// It acquires accounts row (FOR SHARE) and locks sessions in ascending UUID order with
+// pre-lock ownership filtering (account_id = $1), ensuring foreign sessions are never locked.
+// Returns alreadyRevoked=true if the target was already revoked, or domain.ErrSessionNotFound if target does not exist or is foreign.
+func (r *SessionRepository) RevokeSessionTarget(
+	ctx context.Context,
+	accountID string,
+	callerSessionID string,
+	targetSessionID string,
+) (bool, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	accountID = strings.ToLower(accountID)
+	callerSessionID = strings.ToLower(callerSessionID)
+	targetSessionID = strings.ToLower(targetSessionID)
+
+	tx, err := r.db.Begin(queryCtx)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return false, fmt.Errorf("starting revoke transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(queryCtx)
+	}()
+
+	// 1. Lock account row (FOR SHARE) to verify active status.
+	// FOR SHARE serializes with logout-all (which takes FOR UPDATE) while permitting concurrent logins and single revokes.
+	var accountStatus string
+	accLockQuery := `SELECT status FROM accounts WHERE id = $1 FOR SHARE`
+	err = tx.QueryRow(queryCtx, accLockQuery, accountID).Scan(&accountStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, domain.ErrInvalidCredentials
+		}
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return false, fmt.Errorf("locking account for session revocation: %w", err)
+	}
+	if accountStatus != string(domain.AccountStatusActive) {
+		return false, domain.ErrInvalidCredentials
+	}
+
+	type lockedSessionRow struct {
+		id        string
+		expiresAt time.Time
+		revokedAt *time.Time
+	}
+
+	// 2. Lock session rows in ascending UUID order with pre-lock ownership filtering.
+	// By filtering by account_id = $1, another user's session row is never locked.
+	// Ordering in ascending UUID order prevents opposite-direction deadlocks between concurrent revocations.
+	lockedRows := make(map[string]lockedSessionRow)
+
+	if callerSessionID == targetSessionID {
+		var row lockedSessionRow
+		row.id = callerSessionID
+		singleLockQuery := `
+			SELECT expires_at, revoked_at
+			FROM sessions
+			WHERE id = $1 AND account_id = $2
+			FOR UPDATE
+		`
+		err = tx.QueryRow(queryCtx, singleLockQuery, callerSessionID, accountID).Scan(&row.expiresAt, &row.revokedAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, domain.ErrCallerSessionNotFound
+			}
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return false, fmt.Errorf("locking caller session: %w", err)
+		}
+		lockedRows[callerSessionID] = row
+	} else {
+		firstID, secondID := callerSessionID, targetSessionID
+		if firstID > secondID {
+			firstID, secondID = secondID, firstID
+		}
+
+		multiLockQuery := `
+			SELECT id, expires_at, revoked_at
+			FROM sessions
+			WHERE account_id = $1 AND id IN ($2, $3)
+			ORDER BY id
+			FOR UPDATE
+		`
+		rows, err := tx.Query(queryCtx, multiLockQuery, accountID, firstID, secondID)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return false, fmt.Errorf("locking session rows: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var row lockedSessionRow
+			if err := rows.Scan(&row.id, &row.expiresAt, &row.revokedAt); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+					return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+				}
+				return false, fmt.Errorf("scanning locked session row: %w", err)
+			}
+			lockedRows[strings.ToLower(row.id)] = row
+		}
+		if err := rows.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return false, fmt.Errorf("iterating locked session rows: %w", err)
+		}
+	}
+
+	// 3. Post-lock re-verification of caller state using fresh wall-clock time.
+	callerRow, ok := lockedRows[callerSessionID]
+	if !ok {
+		return false, domain.ErrCallerSessionNotFound
+	}
+
+	now := time.Now().UTC()
+	if callerRow.revokedAt != nil {
+		return false, domain.ErrSessionRevoked
+	}
+	if !now.Before(callerRow.expiresAt) {
+		return false, domain.ErrSessionExpired
+	}
+
+	// 4. Validate target session ownership and state.
+	targetRow, ok := lockedRows[targetSessionID]
+	if !ok {
+		// Target does not exist or belongs to another account.
+		// Returns 404 domain.ErrSessionNotFound without leaking existence.
+		return false, domain.ErrSessionNotFound
+	}
+
+	alreadyRevoked := targetRow.revokedAt != nil
+	if !alreadyRevoked {
+		updateQuery := `
+			UPDATE sessions
+			SET revoked_at = clock_timestamp()
+			WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL
+		`
+		_, err = tx.Exec(queryCtx, updateQuery, targetSessionID, accountID)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return false, fmt.Errorf("updating target session revocation: %w", err)
+		}
+	}
+
+	if err := tx.Commit(queryCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return false, fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return false, fmt.Errorf("committing session revocation: %w", err)
+	}
+
+	return alreadyRevoked, nil
+}
+
+// RevokeAllSessions atomically revokes all unrevoked sessions owned by accountID.
+// It acquires accounts row (FOR UPDATE) to serialize with login and refresh,
+// locks all unrevoked sessions in ascending UUID order, validates caller from locked rows,
+// and revokes all sessions using clock_timestamp().
+func (r *SessionRepository) RevokeAllSessions(
+	ctx context.Context,
+	accountID string,
+	callerSessionID string,
+) error {
+	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
+	accountID = strings.ToLower(accountID)
+	callerSessionID = strings.ToLower(callerSessionID)
+
+	tx, err := r.db.Begin(queryCtx)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("starting logout-all transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(queryCtx)
+	}()
+
+	// 1. Acquire account lock (FOR UPDATE) to serialize with concurrent logins and refreshes.
+	var accountStatus string
+	accLockQuery := `SELECT status FROM accounts WHERE id = $1 FOR UPDATE`
+	err = tx.QueryRow(queryCtx, accLockQuery, accountID).Scan(&accountStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrInvalidCredentials
+		}
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("locking account for logout-all: %w", err)
+	}
+	if accountStatus != string(domain.AccountStatusActive) {
+		return domain.ErrInvalidCredentials
+	}
+
+	// 2. Lock all unrevoked sessions for this account in ascending UUID order.
+	lockSessionsQuery := `
+		SELECT id, expires_at
+		FROM sessions
+		WHERE account_id = $1 AND revoked_at IS NULL
+		ORDER BY id
+		FOR UPDATE
+	`
+	rows, err := tx.Query(queryCtx, lockSessionsQuery, accountID)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("locking unrevoked sessions for logout-all: %w", err)
+	}
+	defer rows.Close()
+
+	type unrevokedRow struct {
+		id        string
+		expiresAt time.Time
+	}
+	var callerRow *unrevokedRow
+
+	for rows.Next() {
+		var row unrevokedRow
+		if err := rows.Scan(&row.id, &row.expiresAt); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+				return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+			}
+			return fmt.Errorf("scanning unrevoked session row: %w", err)
+		}
+		if strings.ToLower(row.id) == callerSessionID {
+			callerCopy := row
+			callerRow = &callerCopy
+		}
+	}
+	if err := rows.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("iterating unrevoked session rows: %w", err)
+	}
+
+	// 3. Validate caller directly from the locked unrevoked rows.
+	// If caller is not in unrevokedSessions, it is already revoked or foreign.
+	if callerRow == nil {
+		return domain.ErrSessionRevoked
+	}
+
+	now := time.Now().UTC()
+	if !now.Before(callerRow.expiresAt) {
+		return domain.ErrSessionExpired
+	}
+
+	// 4. Revoke all unrevoked sessions for this account in a single atomic update.
+	updateQuery := `
+		UPDATE sessions
+		SET revoked_at = clock_timestamp()
+		WHERE account_id = $1 AND revoked_at IS NULL
+	`
+	_, err = tx.Exec(queryCtx, updateQuery, accountID)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("updating sessions for logout-all: %w", err)
+	}
+
+	if err := tx.Commit(queryCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isConnectionOrTimeout(err) {
+			return fmt.Errorf("%w: %w", domain.ErrDatabaseUnavailable, err)
+		}
+		return fmt.Errorf("committing logout-all transaction: %w", err)
+	}
+
+	return nil
 }

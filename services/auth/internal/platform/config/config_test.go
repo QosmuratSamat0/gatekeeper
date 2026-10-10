@@ -121,4 +121,63 @@ func TestConfigLoad(t *testing.T) {
 			t.Error("expected error for ACCESS_TOKEN_TTL > 15m")
 		}
 	})
+
+	t.Run("loads default SMTP and email verification settings", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/auth?sslmode=disable")
+		t.Setenv("JWT_PRIVATE_KEY_FILE", "keys/private.pem")
+		t.Setenv("SMTP_HOST", "")
+		t.Setenv("SMTP_PORT", "")
+		t.Setenv("SMTP_FROM", "")
+		t.Setenv("SMTP_SEND_TIMEOUT", "")
+		t.Setenv("EMAIL_VERIFICATION_TOKEN_TTL", "")
+		t.Setenv("EMAIL_VERIFICATION_COOLDOWN", "")
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.SMTPHost != "localhost" {
+			t.Errorf("expected localhost, got %s", cfg.SMTPHost)
+		}
+		if cfg.SMTPPort != 1025 {
+			t.Errorf("expected 1025, got %d", cfg.SMTPPort)
+		}
+		if cfg.SMTPFrom != "no-reply@gatekeeper.local" {
+			t.Errorf("expected no-reply@gatekeeper.local, got %s", cfg.SMTPFrom)
+		}
+		if cfg.SMTPSendTimeout != 10*time.Second {
+			t.Errorf("expected 10s, got %v", cfg.SMTPSendTimeout)
+		}
+		if cfg.EmailVerificationTokenTTL != 24*time.Hour {
+			t.Errorf("expected 24h, got %v", cfg.EmailVerificationTokenTTL)
+		}
+		if cfg.EmailVerificationCooldown != 60*time.Second {
+			t.Errorf("expected 60s, got %v", cfg.EmailVerificationCooldown)
+		}
+	})
+
+	t.Run("rejects invalid SMTP_PORT and TTL durations", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/auth?sslmode=disable")
+		t.Setenv("JWT_PRIVATE_KEY_FILE", "keys/private.pem")
+
+		t.Setenv("SMTP_PORT", "99999")
+		_, err := config.Load()
+		if err == nil {
+			t.Error("expected error for SMTP_PORT > 65535")
+		}
+
+		t.Setenv("SMTP_PORT", "1025")
+		t.Setenv("EMAIL_VERIFICATION_TOKEN_TTL", "30m") // < 1h
+		_, err = config.Load()
+		if err == nil {
+			t.Error("expected error for EMAIL_VERIFICATION_TOKEN_TTL < 1h")
+		}
+
+		t.Setenv("EMAIL_VERIFICATION_TOKEN_TTL", "24h")
+		t.Setenv("EMAIL_VERIFICATION_COOLDOWN", "5s") // < 10s
+		_, err = config.Load()
+		if err == nil {
+			t.Error("expected error for EMAIL_VERIFICATION_COOLDOWN < 10s")
+		}
+	})
 }

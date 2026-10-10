@@ -8,6 +8,7 @@ import (
 	deliveryhttp "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http"
 	authmiddleware "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http/middleware"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/config"
+	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/email"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/password"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/postgres"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/token"
@@ -83,7 +84,26 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 
 	refreshManager := token.NewRefreshTokenManager()
 
-	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
+	emailTokenMgr := token.NewEmailVerificationTokenManager()
+	emailVerificationRepo := accountrepo.NewEmailVerificationRepository(dbPool, cfg.DBQueryTimeout)
+
+	emailSender, err := email.NewSMTPEmailSender(email.SMTPConfig{
+		Host:        cfg.SMTPHost,
+		Port:        cfg.SMTPPort,
+		Username:    cfg.SMTPUsername,
+		Password:    cfg.SMTPPassword,
+		From:        cfg.SMTPFrom,
+		CAFile:      cfg.SMTPCAFile,
+		SendTimeout: cfg.SMTPSendTimeout,
+	})
+	if err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("initializing smtp email sender: %w", err)
+	}
+
+	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, emailVerificationRepo, emailTokenMgr, emailSender, cfg.EmailVerificationTokenTTL)
+	emailVerificationUC := usecase.NewEmailVerificationUsecase(emailVerificationRepo, emailTokenMgr, emailSender, cfg.EmailVerificationTokenTTL, cfg.EmailVerificationCooldown)
+
 	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshManager, dummyHash, cfg.AccessTokenTTL, cfg.RefreshSessionTTL, nil, nil)
 	if err != nil {
 		dbPool.Close()
@@ -108,9 +128,28 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		return nil, fmt.Errorf("initializing logout usecase: %w", err)
 	}
 
+	listSessionsUC, err := usecase.NewListSessionsUsecase(sessionRepo)
+	if err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("initializing list sessions usecase: %w", err)
+	}
+
+	revokeSessionUC, err := usecase.NewRevokeSessionUsecase(sessionRepo)
+	if err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("initializing revoke session usecase: %w", err)
+	}
+
+	logoutAllUC, err := usecase.NewLogoutAllUsecase(sessionRepo)
+	if err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("initializing logout-all usecase: %w", err)
+	}
+
 	loginRateLimiter := authmiddleware.NewIPRateLimiter(cfg.LoginRateLimitAttempts, cfg.LoginRateLimitWindow, 10000)
 	refreshRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 	logoutRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
+	confirmRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 
 	authAdapter := &tokenAuthAdapter{tokenSvc: tokenSvc}
 
@@ -127,6 +166,14 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		loginRateLimiter,
 		refreshRateLimiter,
 		logoutRateLimiter,
+	).WithSessionManagement(
+		listSessionsUC,
+		revokeSessionUC,
+		logoutAllUC,
+	).WithEmailVerification(
+		emailVerificationUC,
+		emailVerificationUC,
+		confirmRateLimiter,
 	)
 	router := handler.Routes()
 

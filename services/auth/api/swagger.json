@@ -80,6 +80,128 @@
                 }
             }
         },
+        "/v1/auth/email/verification/confirm": {
+            "post": {
+                "description": "Confirms account email with a 43-character base64url token. Rate limited to 10 requests/minute per IP.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Confirm email verification",
+                "parameters": [
+                    {
+                        "description": "Verification token payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.confirmEmailVerificationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Email successfully verified"
+                    },
+                    "400": {
+                        "description": "Invalid, expired, or malformed verification token",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body exceeds limit",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Database unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/email/verification/request": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Issues a single-use verification token and delivers it to the account email. Body must be empty.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request email verification",
+                "responses": {
+                    "202": {
+                        "description": "Verification request accepted",
+                        "schema": {
+                            "$ref": "#/definitions/http.verificationRequestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Non-empty request body",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized or session revoked/expired",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body exceeds limit",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Email delivery or database unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/login": {
             "post": {
                 "description": "Authenticates email and password, creates a persistent session, and returns a signed Ed25519 access JWT.",
@@ -206,6 +328,58 @@
                     },
                     "429": {
                         "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Database unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/logout-all": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Terminates all active sessions owned by the authenticated account, including the caller's session.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout all sessions",
+                "responses": {
+                    "204": {
+                        "description": "All sessions successfully revoked"
+                    },
+                    "400": {
+                        "description": "Non-empty body",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized or caller session revoked/expired",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Payload too large (\u003e 4 KiB)",
                         "schema": {
                             "$ref": "#/definitions/http.errorResponse"
                         }
@@ -413,9 +587,182 @@
                     }
                 }
             }
+        },
+        "/v1/auth/sessions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves active sessions for the authenticated account with keyset pagination.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List active sessions",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum number of sessions to return (1..100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque keyset pagination cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Active sessions list",
+                        "schema": {
+                            "$ref": "#/definitions/http.ListSessionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters, malformed cursor, or non-empty body",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized or session revoked/expired",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Payload too large (\u003e 4 KiB)",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Database unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/sessions/{session_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Terminates an active or expired session owned by the authenticated account.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Revoke a session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session UUID to revoke",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Session successfully revoked"
+                    },
+                    "400": {
+                        "description": "Invalid UUID format or non-empty body",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized or caller session revoked/expired",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found or belongs to another account",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Payload too large (\u003e 4 KiB)",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Database unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "http.ListSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "next_cursor": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "sessions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.SessionItemResponse"
+                    }
+                }
+            }
+        },
+        "http.SessionItemResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-10-07T12:00:00Z"
+                },
+                "current": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "expires_at": {
+                    "type": "string",
+                    "example": "2026-10-08T12:00:00Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "c1f7a0b2-3c4d-4e5f-a6b7-c8d9e0f1a2b3"
+                }
+            }
+        },
         "http.accountResponse": {
             "type": "object",
             "required": [
@@ -448,6 +795,18 @@
                 "status": {
                     "type": "string",
                     "example": "active"
+                }
+            }
+        },
+        "http.confirmEmailVerificationRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string",
+                    "example": "dGhpcy1pcy1hLXRlc3QtdmVyaWZpY2F0aW9uLXRva2Vu"
                 }
             }
         },
@@ -643,6 +1002,18 @@
             "properties": {
                 "account": {
                     "$ref": "#/definitions/http.accountResponse"
+                }
+            }
+        },
+        "http.verificationRequestResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "accepted"
                 }
             }
         },

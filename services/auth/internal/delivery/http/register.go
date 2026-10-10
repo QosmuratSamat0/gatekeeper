@@ -115,6 +115,15 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			// Client aborted request; no need to send HTTP body to closed socket.
 			return
 
+		case errors.Is(err, domain.ErrVerificationEmailFailed):
+			if h.logger != nil {
+				h.logger.ErrorContext(r.Context(), "registration verification email delivery failed",
+					slog.String("request_id", chimiddleware.GetReqID(r.Context())),
+					slog.String("category", "email_delivery_failure"),
+				)
+			}
+			writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "Service temporarily unavailable, please retry")
+
 		case errors.Is(err, domain.ErrDatabaseUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(r.Context().Err(), context.DeadlineExceeded):
 			writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "Service temporarily unavailable, please retry")
 

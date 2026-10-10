@@ -27,7 +27,12 @@ var (
 	// or disabled account). A generic error prevents account enumeration or status disclosure.
 	ErrInvalidCredentials = errors.New("invalid email or password")
 
-	// ErrSessionNotFound indicates that the session specified in the token does not exist in storage.
+	// ErrCallerSessionNotFound indicates that the authenticated caller's session row was not found in storage.
+	// This represents an authentication failure for the caller and is mapped to 401 Unauthorized.
+	ErrCallerSessionNotFound = errors.New("caller session not found")
+
+	// ErrSessionNotFound indicates that the target session was not found or is not owned by the caller.
+	// In session management, this represents a target lookup failure and is mapped to 404 Not Found.
 	ErrSessionNotFound = errors.New("session not found")
 
 	// ErrSessionRevoked indicates that the session was explicitly terminated before its expiration.
@@ -48,4 +53,14 @@ var (
 	// ErrCompromisedSessionReplay indicates that a previously consumed refresh token was presented,
 	// signalling token theft or replay. The entire session family is revoked and committed.
 	ErrCompromisedSessionReplay = errors.New("compromised session replay detected")
+
+	// ErrInvalidVerificationToken indicates that a verification token is malformed,
+	// expired, consumed, superseded, or unknown. Using a single generic error prevents
+	// account status probing or token brute-forcing side channels.
+	ErrInvalidVerificationToken = errors.New("invalid or expired verification token")
+
+	// ErrVerificationEmailFailed indicates that remote email delivery failed after
+	// account or token persistence. This is mapped to 503 Service Unavailable so the
+	// caller knows the partial state is recoverable via resend.
+	ErrVerificationEmailFailed = errors.New("failed to send verification email")
 )

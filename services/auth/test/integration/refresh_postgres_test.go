@@ -67,7 +67,7 @@ func setupTestHarness(t *testing.T, pool *pgxpool.Pool) (*testHarness, error) {
 	}
 
 	refreshMgr := token.NewRefreshTokenManager()
-	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
+	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, nil, nil, nil, 0)
 	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshMgr, dummyHash, 10*time.Minute, 720*time.Hour, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating login usecase: %w", err)

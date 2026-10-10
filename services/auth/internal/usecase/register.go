@@ -55,29 +55,49 @@ type RegisterInput struct {
 
 // RegisterUsecase coordinates account registration.
 type RegisterUsecase struct {
-	repo    AccountRepository
-	hasher  PasswordHasher
-	uuidGen UUIDGenerator
-	clock   Clock
+	repo             AccountRepository
+	hasher           PasswordHasher
+	uuidGen          UUIDGenerator
+	clock            Clock
+	verificationRepo EmailVerificationRepository
+	tokenGen         EmailVerificationTokenGenerator
+	emailSender      EmailSender
+	tokenTTL         time.Duration
 }
 
 // NewRegisterUsecase constructs a new RegisterUsecase.
-func NewRegisterUsecase(repo AccountRepository, hasher PasswordHasher, uuidGen UUIDGenerator, clock Clock) *RegisterUsecase {
+func NewRegisterUsecase(
+	repo AccountRepository,
+	hasher PasswordHasher,
+	uuidGen UUIDGenerator,
+	clock Clock,
+	verificationRepo EmailVerificationRepository,
+	tokenGen EmailVerificationTokenGenerator,
+	emailSender EmailSender,
+	tokenTTL time.Duration,
+) *RegisterUsecase {
 	if uuidGen == nil {
 		uuidGen = CryptoUUIDGenerator{}
 	}
 	if clock == nil {
 		clock = RealClock{}
 	}
+	if tokenTTL <= 0 {
+		tokenTTL = 24 * time.Hour
+	}
 	return &RegisterUsecase{
-		repo:    repo,
-		hasher:  hasher,
-		uuidGen: uuidGen,
-		clock:   clock,
+		repo:             repo,
+		hasher:           hasher,
+		uuidGen:          uuidGen,
+		clock:            clock,
+		verificationRepo: verificationRepo,
+		tokenGen:         tokenGen,
+		emailSender:      emailSender,
+		tokenTTL:         tokenTTL,
 	}
 }
 
-// Execute performs registration flow: validate -> hash -> construct -> persist -> return.
+// Execute performs registration flow: validate -> hash -> construct -> persist -> send verification email -> return.
 func (uc *RegisterUsecase) Execute(ctx context.Context, input RegisterInput) (domain.Account, error) {
 	canonicalEmail, err := validateAndCanonicalizeEmail(input.Email)
 	if err != nil {
@@ -113,6 +133,26 @@ func (uc *RegisterUsecase) Execute(ctx context.Context, input RegisterInput) (do
 
 	if err := uc.repo.Create(ctx, account); err != nil {
 		return domain.Account{}, err
+	}
+
+	// Issue verification token and send email post-commit if verification components are configured.
+	if uc.verificationRepo != nil && uc.tokenGen != nil && uc.emailSender != nil {
+		rawToken, tokenHash, err := uc.tokenGen.Generate()
+		if err != nil {
+			return account, fmt.Errorf("generating verification token: %w", err)
+		}
+
+		result, err := uc.verificationRepo.IssueVerificationToken(ctx, account.ID, tokenHash, uc.tokenTTL, 0)
+		if err != nil {
+			return account, fmt.Errorf("issuing verification token: %w", err)
+		}
+
+		// Remote SMTP delivery happens strictly after database writes commit.
+		// If remote email delivery fails, the account remains created and active (email_verified=false),
+		// allowing the user to log in and request a replacement verification email via resend.
+		if err := uc.emailSender.SendVerificationEmail(ctx, account.Email, rawToken, result.ExpiresAt); err != nil {
+			return account, fmt.Errorf("%w: %w", domain.ErrVerificationEmailFailed, err)
+		}
 	}
 
 	return account, nil

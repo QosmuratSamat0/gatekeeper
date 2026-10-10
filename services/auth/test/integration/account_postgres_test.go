@@ -183,7 +183,7 @@ func TestPostgres_ConcurrentDuplicateRegistrationRace(t *testing.T) {
 	accountRepo := repo.NewAccountRepository(pool, 5*time.Second)
 	// Use small Argon2id params for high concurrency testing speed
 	hasher := password.NewArgon2idHasherWithParams(1024, 1, 1, 16, 32, 10)
-	uc := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
+	uc := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, nil, nil, nil, 0)
 
 	concurrentAttempts := 10
 	var successCount atomic.Int32
@@ -262,7 +262,7 @@ func TestPostgres_HTTPRegistrationEndToEnd(t *testing.T) {
 
 	accountRepo := repo.NewAccountRepository(pool, 5*time.Second)
 	hasher := password.NewArgon2idHasherWithParams(1024, 1, 1, 16, 32, 2)
-	uc := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
+	uc := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, nil, nil, nil, 0)
 	discardLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	handler := delivery.NewHandler(discardLogger, pool, uc, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router := handler.Routes()

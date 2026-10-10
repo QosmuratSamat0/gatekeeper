@@ -1,5 +1,30 @@
 basePath: /
 definitions:
+  http.ListSessionsResponse:
+    properties:
+      next_cursor:
+        type: string
+        x-nullable: true
+      sessions:
+        items:
+          $ref: '#/definitions/http.SessionItemResponse'
+        type: array
+    type: object
+  http.SessionItemResponse:
+    properties:
+      created_at:
+        example: "2026-10-07T12:00:00Z"
+        type: string
+      current:
+        example: true
+        type: boolean
+      expires_at:
+        example: "2026-10-08T12:00:00Z"
+        type: string
+      id:
+        example: c1f7a0b2-3c4d-4e5f-a6b7-c8d9e0f1a2b3
+        type: string
+    type: object
   http.accountResponse:
     properties:
       created_at:
@@ -26,6 +51,14 @@ definitions:
     - email_verified
     - id
     - status
+    type: object
+  http.confirmEmailVerificationRequest:
+    properties:
+      token:
+        example: dGhpcy1pcy1hLXRlc3QtdmVyaWZpY2F0aW9uLXRva2Vu
+        type: string
+    required:
+    - token
     type: object
   http.errorDetail:
     properties:
@@ -167,6 +200,14 @@ definitions:
     required:
     - account
     type: object
+  http.verificationRequestResponse:
+    properties:
+      status:
+        example: accepted
+        type: string
+    required:
+    - status
+    type: object
   token.JWK:
     properties:
       crv:
@@ -244,6 +285,87 @@ paths:
       summary: Readiness probe
       tags:
       - probes
+  /v1/auth/email/verification/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Confirms account email with a 43-character base64url token. Rate
+        limited to 10 requests/minute per IP.
+      parameters:
+      - description: Verification token payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.confirmEmailVerificationRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Email successfully verified
+        "400":
+          description: Invalid, expired, or malformed verification token
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Request body exceeds limit
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "415":
+          description: Content-Type must be application/json
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Confirm email verification
+      tags:
+      - auth
+  /v1/auth/email/verification/request:
+    post:
+      description: Issues a single-use verification token and delivers it to the account
+        email. Body must be empty.
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Verification request accepted
+          schema:
+            $ref: '#/definitions/http.verificationRequestResponse'
+        "400":
+          description: Non-empty request body
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "401":
+          description: Unauthorized or session revoked/expired
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Request body exceeds limit
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Email delivery or database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Request email verification
+      tags:
+      - auth
   /v1/auth/login:
     post:
       consumes:
@@ -340,6 +462,40 @@ paths:
           schema:
             $ref: '#/definitions/http.errorResponse'
       summary: Log out current session
+      tags:
+      - auth
+  /v1/auth/logout-all:
+    post:
+      description: Terminates all active sessions owned by the authenticated account,
+        including the caller's session.
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: All sessions successfully revoked
+        "400":
+          description: Non-empty body
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "401":
+          description: Unauthorized or caller session revoked/expired
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Payload too large (> 4 KiB)
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Logout all sessions
       tags:
       - auth
   /v1/auth/me:
@@ -467,6 +623,96 @@ paths:
           schema:
             $ref: '#/definitions/http.errorResponse'
       summary: Register a new account
+      tags:
+      - auth
+  /v1/auth/sessions:
+    get:
+      description: Retrieves active sessions for the authenticated account with keyset
+        pagination.
+      parameters:
+      - default: 20
+        description: Maximum number of sessions to return (1..100)
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque keyset pagination cursor
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Active sessions list
+          schema:
+            $ref: '#/definitions/http.ListSessionsResponse'
+        "400":
+          description: Invalid query parameters, malformed cursor, or non-empty body
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "401":
+          description: Unauthorized or session revoked/expired
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Payload too large (> 4 KiB)
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List active sessions
+      tags:
+      - auth
+  /v1/auth/sessions/{session_id}:
+    delete:
+      description: Terminates an active or expired session owned by the authenticated
+        account.
+      parameters:
+      - description: Session UUID to revoke
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Session successfully revoked
+        "400":
+          description: Invalid UUID format or non-empty body
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "401":
+          description: Unauthorized or caller session revoked/expired
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "404":
+          description: Session not found or belongs to another account
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "413":
+          description: Payload too large (> 4 KiB)
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Database unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Revoke a session
       tags:
       - auth
 securityDefinitions:

@@ -41,20 +41,51 @@ type RefreshService interface {
 	Execute(ctx context.Context, input usecase.RefreshInput) (usecase.RefreshOutput, error)
 }
 
+// ListSessionsService defines the active sessions listing usecase contract.
+type ListSessionsService interface {
+	Execute(ctx context.Context, accountID, callerSessionID string, filter usecase.SessionListFilter) (usecase.SessionListPage, error)
+}
+
+// RevokeSessionService defines the single session revocation usecase contract.
+type RevokeSessionService interface {
+	Execute(ctx context.Context, accountID, callerSessionID, targetSessionID string) error
+}
+
+// LogoutAllService defines the logout-all revocation usecase contract.
+type LogoutAllService interface {
+	Execute(ctx context.Context, accountID, callerSessionID string) error
+}
+
+// EmailVerificationRequestService defines the email verification request usecase contract.
+type EmailVerificationRequestService interface {
+	RequestVerification(ctx context.Context, accountID string) error
+}
+
+// EmailVerificationConfirmService defines the email verification confirm usecase contract.
+type EmailVerificationConfirmService interface {
+	ConfirmVerification(ctx context.Context, rawToken string) error
+}
+
 // Handler holds HTTP dependencies and endpoints.
 type Handler struct {
-	logger           *slog.Logger
-	readiness        ReadinessChecker
-	registerUC       RegistrationService
-	loginUC          LoginService
-	refreshUC        RefreshService
-	currentAccountUC CurrentAccountService
-	logoutUC         LogoutService
-	tokenVerifier    authmiddleware.TokenVerifier
-	jwksProvider     JWKSProvider
-	rateLimiter      *authmiddleware.IPRateLimiter
-	refreshLimiter   *authmiddleware.IPRateLimiter
-	logoutLimiter    *authmiddleware.IPRateLimiter
+	logger                  *slog.Logger
+	readiness               ReadinessChecker
+	registerUC              RegistrationService
+	loginUC                 LoginService
+	refreshUC               RefreshService
+	currentAccountUC        CurrentAccountService
+	logoutUC                LogoutService
+	tokenVerifier           authmiddleware.TokenVerifier
+	jwksProvider            JWKSProvider
+	rateLimiter             *authmiddleware.IPRateLimiter
+	refreshLimiter          *authmiddleware.IPRateLimiter
+	logoutLimiter           *authmiddleware.IPRateLimiter
+	listSessionsUC          ListSessionsService
+	revokeSessionUC         RevokeSessionService
+	logoutAllUC             LogoutAllService
+	emailVerificationReqUC  EmailVerificationRequestService
+	emailVerificationConfUC EmailVerificationConfirmService
+	confirmLimiter          *authmiddleware.IPRateLimiter
 }
 
 // NewHandler creates a new Handler instance with all injected usecases and platform adapters.
@@ -86,6 +117,30 @@ func NewHandler(
 		refreshLimiter:   refreshLimiter,
 		logoutLimiter:    logoutLimiter,
 	}
+}
+
+// WithSessionManagement configures session management use cases on the Handler.
+func (h *Handler) WithSessionManagement(
+	listUC ListSessionsService,
+	revokeUC RevokeSessionService,
+	logoutAllUC LogoutAllService,
+) *Handler {
+	h.listSessionsUC = listUC
+	h.revokeSessionUC = revokeUC
+	h.logoutAllUC = logoutAllUC
+	return h
+}
+
+// WithEmailVerification configures email verification use cases and confirm rate limiter on the Handler.
+func (h *Handler) WithEmailVerification(
+	requestUC EmailVerificationRequestService,
+	confirmUC EmailVerificationConfirmService,
+	confirmLimiter *authmiddleware.IPRateLimiter,
+) *Handler {
+	h.emailVerificationReqUC = requestUC
+	h.emailVerificationConfUC = confirmUC
+	h.confirmLimiter = confirmLimiter
+	return h
 }
 
 // Routes constructs the HTTP router and registers public and probe routes.
@@ -152,13 +207,43 @@ func (h *Handler) Routes() http.Handler {
 		}
 	}
 
+	// Public email verification confirmation endpoint with per-IP rate limiting
+	if h.emailVerificationConfUC != nil {
+		if h.confirmLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.confirmLimiter, "Too many verification attempts. Please try again later.")).
+				Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
+		} else {
+			r.Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
+		}
+	}
+
 	// Protected endpoints (require verified Bearer token)
 	if h.tokenVerifier != nil {
 		r.Group(func(protected chi.Router) {
+			// Apply Cache-Control: no-store FIRST so all responses (including 401s from BearerAuth) receive it
+			protected.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Cache-Control", "no-store")
+					next.ServeHTTP(w, r)
+				})
+			})
+
 			protected.Use(authmiddleware.BearerAuth(h.tokenVerifier))
 
 			if h.currentAccountUC != nil {
 				protected.Get("/v1/auth/me", h.Me)
+			}
+			if h.listSessionsUC != nil {
+				protected.Get("/v1/auth/sessions", h.ListSessions)
+			}
+			if h.revokeSessionUC != nil {
+				protected.Delete("/v1/auth/sessions/{session_id}", h.RevokeSession)
+			}
+			if h.logoutAllUC != nil {
+				protected.Post("/v1/auth/logout-all", h.LogoutAll)
+			}
+			if h.emailVerificationReqUC != nil {
+				protected.Post("/v1/auth/email/verification/request", h.RequestEmailVerification)
 			}
 		})
 	}

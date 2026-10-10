@@ -31,6 +31,17 @@ type Config struct {
 
 	// Refresh Token and Session Family Configuration
 	RefreshSessionTTL time.Duration
+
+	// SMTP and Email Verification Configuration
+	SMTPHost                  string
+	SMTPPort                  int
+	SMTPUsername              string
+	SMTPPassword              string
+	SMTPFrom                  string
+	SMTPCAFile                string
+	SMTPSendTimeout           time.Duration
+	EmailVerificationTokenTTL time.Duration
+	EmailVerificationCooldown time.Duration
 }
 
 // Load reads and validates configuration from environment variables.
@@ -144,21 +155,81 @@ func Load() (Config, error) {
 		refreshSessionTTL = d
 	}
 
+	smtpHost := os.Getenv("SMTP_HOST")
+	if smtpHost == "" {
+		smtpHost = "localhost"
+	}
+
+	smtpPort := 1025
+	if val := os.Getenv("SMTP_PORT"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > 65535 {
+			return Config{}, fmt.Errorf("SMTP_PORT must be an integer between 1 and 65535, got %q", val)
+		}
+		smtpPort = n
+	}
+
+	smtpUsername := os.Getenv("SMTP_USERNAME")
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+
+	smtpFrom := os.Getenv("SMTP_FROM")
+	if smtpFrom == "" {
+		smtpFrom = "no-reply@gatekeeper.local"
+	}
+
+	smtpCAFile := os.Getenv("SMTP_CA_FILE")
+
+	smtpSendTimeout := 10 * time.Second
+	if val := os.Getenv("SMTP_SEND_TIMEOUT"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < time.Second || d > time.Minute {
+			return Config{}, fmt.Errorf("SMTP_SEND_TIMEOUT must be a duration between 1s and 1m, got %q", val)
+		}
+		smtpSendTimeout = d
+	}
+
+	emailVerificationTokenTTL := 24 * time.Hour
+	if val := os.Getenv("EMAIL_VERIFICATION_TOKEN_TTL"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < time.Hour || d > 168*time.Hour {
+			return Config{}, fmt.Errorf("EMAIL_VERIFICATION_TOKEN_TTL must be a duration between 1h and 168h, got %q", val)
+		}
+		emailVerificationTokenTTL = d
+	}
+
+	emailVerificationCooldown := 60 * time.Second
+	if val := os.Getenv("EMAIL_VERIFICATION_COOLDOWN"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 10*time.Second || d > 10*time.Minute {
+			return Config{}, fmt.Errorf("EMAIL_VERIFICATION_COOLDOWN must be a duration between 10s and 10m, got %q", val)
+		}
+		emailVerificationCooldown = d
+	}
+
 	return Config{
-		HTTPAddr:                addr,
-		DatabaseURL:             dbURL,
-		DBConnectTimeout:        connectTimeout,
-		DBQueryTimeout:          queryTimeout,
-		HTTPShutdownTimeout:     shutdownTimeout,
-		PasswordHashConcurrency: hashConcurrency,
-		JWTIssuer:               jwtIssuer,
-		JWTAudience:             jwtAudience,
-		JWTActiveKid:            jwtActiveKid,
-		JWTPrivateKeyFile:       jwtPrivateKeyFile,
-		JWTPublicKeysFile:       jwtPublicKeysFile,
-		AccessTokenTTL:          tokenTTL,
-		LoginRateLimitAttempts:  rateLimitAttempts,
-		LoginRateLimitWindow:    rateLimitWindow,
-		RefreshSessionTTL:       refreshSessionTTL,
+		HTTPAddr:                  addr,
+		DatabaseURL:               dbURL,
+		DBConnectTimeout:          connectTimeout,
+		DBQueryTimeout:            queryTimeout,
+		HTTPShutdownTimeout:       shutdownTimeout,
+		PasswordHashConcurrency:   hashConcurrency,
+		JWTIssuer:                 jwtIssuer,
+		JWTAudience:               jwtAudience,
+		JWTActiveKid:              jwtActiveKid,
+		JWTPrivateKeyFile:         jwtPrivateKeyFile,
+		JWTPublicKeysFile:         jwtPublicKeysFile,
+		AccessTokenTTL:            tokenTTL,
+		LoginRateLimitAttempts:    rateLimitAttempts,
+		LoginRateLimitWindow:      rateLimitWindow,
+		RefreshSessionTTL:         refreshSessionTTL,
+		SMTPHost:                  smtpHost,
+		SMTPPort:                  smtpPort,
+		SMTPUsername:              smtpUsername,
+		SMTPPassword:              smtpPassword,
+		SMTPFrom:                  smtpFrom,
+		SMTPCAFile:                smtpCAFile,
+		SMTPSendTimeout:           smtpSendTimeout,
+		EmailVerificationTokenTTL: emailVerificationTokenTTL,
+		EmailVerificationCooldown: emailVerificationCooldown,
 	}, nil
 }

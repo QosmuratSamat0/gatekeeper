@@ -65,7 +65,7 @@ func TestPostgres_LoginAndSessionEndToEnd(t *testing.T) {
 	}
 
 	refreshMgr := token.NewRefreshTokenManager()
-	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil)
+	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, nil, nil, nil, 0)
 	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshMgr, dummyHash, 10*time.Minute, 720*time.Hour, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create login usecase: %v", err)
