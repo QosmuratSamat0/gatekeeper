@@ -98,8 +98,9 @@
   * Re-verified full test suite: unit tests (100%), PostgreSQL integration tests (22/22), `golangci-lint` (0 issues), Linux `-race` (0 data races), Docker build, and Trivy scan (0 findings).
 - Accepted (2026-10-10): User manually tested the AUTH-05 email verification flow and confirmed it works. AUTH-04/AUTH-05 implementation is committed as `4d29ab8`; not pushed.
 - Prepared: [AUTH-06](auth-06.md) — password recovery by email. The revised proposal allows a bounded in-process email dispatcher and documents its drop/shutdown behavior and residual timing risk. No implementation is authorized before plan review.
+- Done (2026-10-10): configured local pre-commit hygiene and Gitleaks checks plus the Auth Go test suite on pre-push; installed the pre-push hook in this clone.
 - Done: AUTH-04/AUTH-05 committed as `4d29ab8`; push remains pending separate user authorization.
-- Next: Review the revised AUTH-06 plan and approve or request changes before coding.
+- Next: Push the reviewed documentation and local-check commits; then review the revised AUTH-06 plan before coding.
 
 ## Previous foundation task (pending)
 Stage 0, weeks 1-2: foundation.

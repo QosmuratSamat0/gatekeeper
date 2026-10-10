@@ -1,0 +1,88 @@
+# Gitleaks configuration.
+#
+# Gitleaks runs as a pre-commit hook (see .pre-commit-config.yaml) and scans
+# every diff for tokens, API keys, private keys, JWTs, and similar secrets.
+# This file lets you suppress *false positives* without disabling the scanner.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  HOW TO ADD A NEW ALLOWLIST
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Step 0 — Stop and ask: is this really a false positive?
+#   - If the value is real, ROTATE THE SECRET, do not allowlist it.
+#   - If the code is unused, DELETE the line, do not allowlist it.
+#   - Only allowlist values that are intentionally fake (test fixtures,
+#     placeholder defaults, public keys, sample SDK snippets in docs).
+#
+# Step 1 — Reproduce the failure locally:
+#       gitleaks detect --no-git --source <path> --config .gitleaks.toml --verbose
+#   Note three things from the output:
+#       RuleID:      e.g. "generic-api-key"          → goes into targetRules
+#       File:        e.g. "app/core/config.py"       → goes into paths (regex)
+#       Secret:      e.g. "sk-test-1234..."          → derive a regex for it
+#
+# Step 2 — Append a new [[allowlists]] block at the bottom of this file.
+#   Always include all four narrowing fields:
+#
+#       [[allowlists]]
+#       description = "<one short line: what is allowed and why>"
+#       condition   = "AND"                    # require ALL fields to match
+#       targetRules = ["<rule-id>"]            # scope to one rule only
+#       paths       = ['''<path-regex>''']     # scope to one file/dir
+#       regexes     = ['''<value-regex>''']    # scope to the exact pattern
+#
+#   condition = "AND" is REQUIRED. Without it, gitleaks defaults to OR and
+#   matching just the path silences every future leak in that file.
+#
+# Step 3 — Verify the allowlist is narrow enough:
+#       gitleaks detect --no-git --source <path> --config .gitleaks.toml --verbose
+#   The original finding should be gone. Then plant a fake real leak (e.g.
+#   aws_secret = "AKIA..." in the same file) and confirm gitleaks STILL
+#   reports it. If it doesn't, your allowlist is too broad — tighten it.
+#
+# Step 4 — Commit .gitleaks.toml together with the code that triggered it.
+#   In the commit message, explain WHY the value is safe (test fixture,
+#   public sample, generated dev default). Reviewers should be able to
+#   audit the allowlist without reading the surrounding code.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  FIELD REFERENCE
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   description    Free-form. Required for readability.
+#   condition      "AND" (recommended) or "OR" (default — too permissive).
+#   targetRules    Restrict the allowlist to specific built-in rule IDs.
+#                  Get the rule ID from the gitleaks finding ("RuleID: ...").
+#                  Without this, the allowlist applies to every rule.
+#   paths          List of regex patterns matched against file paths.
+#   regexes        List of regex patterns matched against the secret value.
+#   commits        List of commit SHAs to ignore. Use sparingly.
+#   stopwords      List of substrings; if present in the match, allow it.
+#                  Useful for words like "example", "dummy", "placeholder".
+#
+# Regex syntax: triple-quoted strings ('''...''') so backslashes are literal.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  WHEN NOT TO ADD AN ALLOWLIST
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   • The leak is a real credential.            → Rotate it.
+#   • The leak is in dead code.                  → Delete it.
+#   • The leak is in a test file.                → Move the value into a
+#                                                  fixture using os.environ
+#                                                  or a monkeypatch.
+#   • You're tempted to allowlist a whole dir.   → Almost always wrong.
+#                                                  Add per-file entries.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  INHERITANCE
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# useDefault = true means we extend gitleaks' built-in ruleset. Do not
+# remove it — that's where the value of running gitleaks comes from.
+# Add custom rules below the allowlists if the project has internal token
+# formats not covered by defaults.
+#
+
+[extend]
+useDefault = true

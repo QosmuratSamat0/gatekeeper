@@ -1,0 +1,43 @@
+# Pre-commit hooks for the Gatekeeper Go repository.
+#
+# Local setup, once per clone:
+#     pre-commit install
+#     pre-commit install --hook-type pre-push
+#
+# Fast hygiene and secret checks run on every commit. Go tests run on push.
+#
+# Developers can still bypass local hooks with git commit --no-verify
+# or git push --no-verify.
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  # Basic file hygiene: trailing spaces, final newline, valid YAML/JSON,
+  # large files, and accidentally committed private keys.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-private-key
+
+  # Secret scanner. Catches tokens, keys, and credentials before they
+  # are committed. Configure allowlists in .gitleaks.toml when needed.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Go tests run on push, not on every commit, to keep local commits fast.
+  - repo: local
+    hooks:
+      - id: auth-go-tests
+        name: Auth Go tests
+        entry: go -C services/auth test ./...
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
