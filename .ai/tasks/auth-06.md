@@ -15,13 +15,15 @@ existing API contracts intact except for the two recovery endpoints.
 In scope:
 - Public request and confirmation endpoints for password recovery.
 - One-time opaque tokens delivered through the existing `EmailSender` port.
+- In-process bounded email delivery dispatcher (channel + worker pool) decoupling remote SMTP latency from HTTP responses.
 - Digest-only PostgreSQL persistence, expiry, replacement, and one-time use.
 - Argon2id password hashing using the existing bounded hasher.
 - Atomic password update and revocation of every active session for the account.
 - Rate limits, threat-model note, generated Swagger, README and tracked config template.
 
 Out of scope: changing email addresses, verifying an email as a side effect,
-login policy changes, MFA, roles, Access/Gateway, external mail vendors, queues,
+login policy changes, MFA, roles, Access/Gateway, external mail vendors, external
+distributed message brokers (Kafka, RabbitMQ, Redis), persistent outbox table,
 HTML email, and frontend/deep-link work.
 
 ## HTTP contract
@@ -68,8 +70,20 @@ Responses containing token/account state use `Cache-Control: no-store`.
   and `email_verified` unchanged. Existing access tokens must stop working
   through the normal revoked-session check; refresh tokens must no longer work.
 - Do not hold a database transaction or row locks during SMTP I/O. Persist
-  the token before sending and preserve generic public behavior on delivery
-  failure. The plan must explain how cooldown and retry behave after failure.
+  the token before sending and dispatch delivery via an in-process bounded dispatcher
+  (8 slots, 4 workers) using a dedicated application worker context. Remote SMTP I/O
+  is excluded from the HTTP response path, allowing immediate generic 202 responses.
+  Note that while the queue removes macroscopic SMTP latency, it does not guarantee
+  eliminating timing differences between existing and unknown accounts due to database
+  operations (residual timing side-channel remains in the threat model).
+- On queue overflow, tasks are dropped without blocking; the server logs a safe failure
+  category and continues returning generic 202. The user can retry after the 60s cooldown,
+  provided load has normalized. On ungraceful process crashes, in-flight queued tasks may
+  be lost before transmission; recovery is likewise achieved via retry after cooldown.
+- On graceful shutdown, drain waits up to 45 seconds for active and queued tasks to complete
+  before closing the database connection pool. Deployment manifests must set
+  `terminationGracePeriodSeconds` to at least 75 seconds (accounting for 10s HTTP shutdown,
+  45s queue drain, and safety margin) to avoid premature SIGKILL.
 
 ## Architecture and plan required before coding
 

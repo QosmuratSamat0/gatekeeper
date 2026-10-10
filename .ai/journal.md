@@ -410,3 +410,11 @@
 - Problems: None.
 - Next: Review and approve the final AUTH-06 plan before coding; push only when separately requested.
 - Commit: implementation `4d29ab8`; record commit pending.
+
+### 2026-10-10 - AUTH-06-PLAN-REVISION - Align recovery plan with bounded async delivery
+- Done: Updated the AUTH-06 task, ADR 0009, and threat-model note for the proposed in-process dispatcher, queue overflow/crash behavior, shutdown budget, and residual timing risk.
+- Files: .ai/tasks/auth-06.md, .ai/prompts/auth-06-threat-model.md, docs/adr/0009-password-recovery.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: AUTH-06 remains a proposal; implementation is not authorized until Codex reviews the revised plan.
+- Problems: Deployment manifests are not part of the current proposal, so the 75-second termination grace remains an operational requirement rather than a checked manifest value.
+- Next: Commit the revised design, then prepare the local pre-commit and pre-push checks.
+- Commit: pending.
