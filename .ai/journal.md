@@ -20,7 +20,7 @@
 - Decisions: ADR 0009 implemented: in-process bounded dispatcher (8 slots, 4 workers) decouples SMTP latency from HTTP response path while residual timing risk is documented; generic 202 on request; single atomic confirmation transaction revokes active sessions and updates credentials; Argon2id hash computed before database transaction; dispatcher Stop cancels workers and awaits their complete exit on drain timeout.
 - Problems: resolved Enqueue/Stop race condition; resolved dispatcher task timeout mismatch; resolved worker termination before database pool closure.
 - Next: Commit AUTH-06, record commit hash, and push to origin main.
-- Commit: pending
+- Commit: e4d9326
 ### 2026-10-11 01:45 - AUTH-06-DISPATCHER-RACE-AND-TIMEOUT - Fixed Enqueue/Stop race condition and coordinated dispatcher timeout with configuration
 - Done:
   1. Fixed race condition in `InProcessPasswordResetDispatcher`:

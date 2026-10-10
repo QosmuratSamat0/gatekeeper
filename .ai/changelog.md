@@ -1,5 +1,7 @@
 # Changelog
 
+- e4d9326 2026-10-11 feat(auth): implement password recovery by email (AUTH-06) - Bounded in-process delivery dispatcher, SHA-256 digest tokens, STARTTLS SMTP delivery, PostgreSQL migration and transactional repository, Argon2id password reset, session revocation, Swagger docs, concurrency hardening, and workflow_dispatch trigger.
+
 - ce5d5d6 2026-10-10 fix(auth-06): keep generated Swagger output stable - Excluded generated swagger.json from EOF normalization, aligned the artifact to Swag v1.16.4, and clarified residual timing risk.
 
 - 9f79d87 2026-10-10 docs(auth-06): align recovery proposal with async delivery - Updated the recovery task, ADR, and threat model for bounded in-process email delivery and its residual risks.
