@@ -1,10 +1,8 @@
 package http_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -311,9 +309,4 @@ func TestConfirmPasswordReset_HTTP(t *testing.T) {
 			t.Fatalf("expected 400, got %d", rec.Code)
 		}
 	})
-}
-
-func unusedBuffers() {
-	_ = bytes.NewBuffer(nil)
-	_ = errors.New("")
 }

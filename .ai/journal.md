@@ -1,5 +1,12 @@
 # Journal
 
+### 2026-10-11 03:45 - AUTH-06-LINT-FIX - Removed unused helper from HTTP password recovery test
+- Done: removed `unusedBuffers` function and unused `bytes` and `errors` imports from `password_recovery_test.go` to satisfy the `unused` linter in `golangci-lint`.
+- Files: services/auth/internal/delivery/http/password_recovery_test.go, .ai/journal.md.
+- Decisions: eliminate dead code flagged by CI linter.
+- Problems: CI step 'Run golangci-lint' failed on unused test helper.
+- Next: Commit fix and push to main.
+- Commit: pending
 ### 2026-10-11 03:25 - AUTH-06-IMPL - Password recovery by email implementation, concurrency hardening, and CI workflow update
 - Done: implemented AUTH-06 (Password recovery by email) per ADR 0009 with full concurrency hardening, user manual API verification, and CI updates:
   1. Migration `000006_create_password_reset_tokens`: bounded storage table `password_reset_tokens` with CASCADE FK, SHA-256 binary token_hash, created_at, expires_at.
