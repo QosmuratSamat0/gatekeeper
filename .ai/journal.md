@@ -402,3 +402,11 @@
 - Problems: None in the checks that ran.
 - Next: Review staged paths, commit accepted AUTH-04/AUTH-05 changes, then record the hash in a documentation commit.
 - Commit: pending.
+
+### 2026-10-10 - AUTH04-AUTH05-DELIVERY-RECORD - Record accepted Auth delivery hash
+- Done: Recorded implementation commit `4d29ab8` for accepted AUTH-04 session management and AUTH-05 email verification.
+- Files: .ai/journal.md, .ai/changelog.md, .ai/tasks/current.md.
+- Decisions: No implementation changes. Local Mailpit certificates and temporary files remain untracked; no push was performed.
+- Problems: None.
+- Next: Review and approve the final AUTH-06 plan before coding; push only when separately requested.
+- Commit: implementation `4d29ab8`; record commit pending.

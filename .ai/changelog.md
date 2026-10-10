@@ -1,5 +1,7 @@
 # Changelog
 
+- 4d29ab8 2026-10-10 feat(auth): add session management and email verification - Added AUTH-04 session listing/revocation/logout-all and AUTH-05 email verification with digest-only tokens, STARTTLS delivery, migrations, tests, and generated Swagger.
+
 - f226159 2026-10-07 feat(auth): implement rotating refresh tokens and reuse detection - Atomic JSON refresh rotation, persistent reuse revocation, dual-mode logout, PostgreSQL migration/tests, signing-key protection and AUTH-04 brief.
 
 - d563dba 2026-10-06 fix(auth): upgrade vulnerable Go dependencies - Updated pgx and Go x modules after Trivy findings; security scanner remains enabled.

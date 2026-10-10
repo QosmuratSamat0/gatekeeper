@@ -96,9 +96,10 @@
   * In `services/auth/internal/delivery/http/email_verification.go`, reordered error checking: moved `context.Canceled` check above `domain.ErrVerificationEmailFailed` (mirroring `register.go:114`), preventing spurious 503 response and email delivery failure logging if the client cancels during SMTP dispatch.
   * Added unit tests in `services/auth/internal/delivery/http/email_verification_test.go` verifying that client-side cancellation during email transmission and direct usecase `context.Canceled` write no body and do not return 503.
   * Re-verified full test suite: unit tests (100%), PostgreSQL integration tests (22/22), `golangci-lint` (0 issues), Linux `-race` (0 data races), Docker build, and Trivy scan (0 findings).
-- Accepted (2026-10-10): User manually tested the AUTH-05 email verification flow and confirmed it works. Its implementation is still uncommitted in the working tree; do not commit or push without the user's instruction.
+- Accepted (2026-10-10): User manually tested the AUTH-05 email verification flow and confirmed it works. AUTH-04/AUTH-05 implementation is committed as `4d29ab8`; not pushed.
 - Prepared: [AUTH-06](auth-06.md) — password recovery by email. Proposed policy is recorded in ADR 0009 and its threat-model note. Gemini must present a plan; user approval is required before implementation.
-- Next: Complete the authorized AUTH-04/AUTH-05 commit and record its hash; push only after separate user authorization. Review the final AUTH-06 plan before coding.
+- Done: AUTH-04/AUTH-05 committed as `4d29ab8`; push remains pending separate user authorization.
+- Next: Review and approve the final AUTH-06 plan before coding.
 
 ## Previous foundation task (pending)
 Stage 0, weeks 1-2: foundation.
