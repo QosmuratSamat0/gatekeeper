@@ -1,5 +1,7 @@
 # Changelog
 
+- ce5d5d6 2026-10-10 fix(auth-06): keep generated Swagger output stable - Excluded generated swagger.json from EOF normalization, aligned the artifact to Swag v1.16.4, and clarified residual timing risk.
+
 - 9f79d87 2026-10-10 docs(auth-06): align recovery proposal with async delivery - Updated the recovery task, ADR, and threat model for bounded in-process email delivery and its residual risks.
 - b709210 2026-10-10 chore(dev): add local secret and push checks - Added Gitleaks and file hygiene hooks plus the Auth Go test suite on pre-push.
 

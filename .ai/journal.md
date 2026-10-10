@@ -441,5 +441,13 @@
 - Decisions: Generated Swagger output is authoritative; the formatter must not add a newline the generator removes.
 - Verification: Local `swag` v1.16.4 regenerated the API artifacts with only the expected final-newline difference; `pre-commit validate-config`, `git diff --check`, and the targeted end-of-file hook passed.
 - Problems: The network was unavailable for `go run ...@v1.16.4`; the installed `swag` binary matched v1.16.4 and generated the observed CI diff.
-- Next: Commit the corrected generated artifact and hook exclusion, then push after pre-push checks.
+- Next: Record the commit hash, then push after pre-push checks.
+- Commit: `ce5d5d6`.
+
+### 2026-10-10 - AUTH06-SWAGGER-DELIVERY-RECORD - Record generated Swagger fix
+- Done: Recorded commit `ce5d5d6`, which keeps generated Swagger byte-for-byte consistent and clarifies the residual timing risk.
+- Files: .ai/journal.md, .ai/changelog.md.
+- Decisions: AUTH-06 technical plan review is complete; implementation still requires explicit user approval per ADR 0009.
+- Problems: None.
+- Next: Push the fix after verifying origin/main and running the pre-push hook.
 - Commit: pending.
