@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,8 +27,11 @@ type Config struct {
 	AccessTokenTTL    time.Duration
 
 	// Rate Limiting Configuration
-	LoginRateLimitAttempts int
-	LoginRateLimitWindow   time.Duration
+	LoginRateLimitAttempts    int
+	LoginRateLimitWindow      time.Duration
+	RegisterRateLimitAttempts int
+	RegisterRateLimitWindow   time.Duration
+	TrustedProxyCIDRs         []*net.IPNet
 
 	// Refresh Token and Session Family Configuration
 	RefreshSessionTTL time.Duration
@@ -151,6 +155,33 @@ func Load() (Config, error) {
 		rateLimitWindow = d
 	}
 
+	regRateLimitAttempts := 5
+	if val := os.Getenv("REGISTER_RATE_LIMIT_ATTEMPTS"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > 1000 {
+			return Config{}, fmt.Errorf("REGISTER_RATE_LIMIT_ATTEMPTS must be an integer between 1 and 1000, got %q", val)
+		}
+		regRateLimitAttempts = n
+	}
+
+	regRateLimitWindow := time.Minute
+	if val := os.Getenv("REGISTER_RATE_LIMIT_WINDOW"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d <= 0 {
+			return Config{}, fmt.Errorf("invalid REGISTER_RATE_LIMIT_WINDOW: %w", err)
+		}
+		regRateLimitWindow = d
+	}
+
+	var trustedProxyCIDRs []*net.IPNet
+	if val := os.Getenv("TRUSTED_PROXY_CIDRS"); strings.TrimSpace(val) != "" {
+		parsedNets, err := parseCIDRList(val)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid TRUSTED_PROXY_CIDRS: %w", err)
+		}
+		trustedProxyCIDRs = parsedNets
+	}
+
 	refreshSessionTTL := 720 * time.Hour
 	if val := os.Getenv("REFRESH_SESSION_TTL"); val != "" {
 		d, err := time.ParseDuration(val)
@@ -253,6 +284,9 @@ func Load() (Config, error) {
 		AccessTokenTTL:                 tokenTTL,
 		LoginRateLimitAttempts:         rateLimitAttempts,
 		LoginRateLimitWindow:           rateLimitWindow,
+		RegisterRateLimitAttempts:      regRateLimitAttempts,
+		RegisterRateLimitWindow:        regRateLimitWindow,
+		TrustedProxyCIDRs:              trustedProxyCIDRs,
 		RefreshSessionTTL:              refreshSessionTTL,
 		SMTPHost:                       smtpHost,
 		SMTPPort:                       smtpPort,
@@ -267,4 +301,23 @@ func Load() (Config, error) {
 		PasswordResetCooldown:          passwordResetCooldown,
 		PasswordResetQueueDrainTimeout: passwordResetQueueDrainTimeout,
 	}, nil
+}
+
+// parseCIDRList parses a comma-separated list of CIDR network addresses.
+// It returns an error with no secret information if any entry is empty or malformed.
+func parseCIDRList(s string) ([]*net.IPNet, error) {
+	parts := strings.Split(s, ",")
+	nets := make([]*net.IPNet, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			return nil, fmt.Errorf("empty CIDR entry")
+		}
+		_, ipNet, err := net.ParseCIDR(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", trimmed, err)
+		}
+		nets = append(nets, ipNet)
+	}
+	return nets, nil
 }

@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	delivery "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http"
+	authmiddleware "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http/middleware"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/domain"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/usecase"
 )
@@ -425,5 +427,95 @@ func TestRouter_SwaggerUIEndpoints(t *testing.T) {
 	bodyUI := wUI.Body.String()
 	if !strings.Contains(bodyUI, "swagger-ui") {
 		t.Errorf("expected swagger-ui container in index.html, got: %s", bodyUI)
+	}
+}
+
+func TestRegisterHandler_RateLimiting(t *testing.T) {
+	fixedTime := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	var executionCount atomic.Int32
+
+	countingSvc := &mockRegistrationService{
+		executeFn: func(ctx context.Context, input usecase.RegisterInput) (domain.Account, error) {
+			executionCount.Add(1)
+			return domain.Account{
+				ID:            "a0000000-0000-4000-8000-000000000001",
+				Email:         input.Email,
+				Status:        domain.AccountStatusActive,
+				EmailVerified: false,
+				CreatedAt:     fixedTime,
+				UpdatedAt:     fixedTime,
+			}, nil
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	limiter := authmiddleware.NewIPRateLimiter(5, time.Minute, 100)
+	handler := delivery.NewHandler(logger, nil, countingSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil).
+		WithRegistrationRateLimiter(limiter)
+	router := handler.Routes()
+
+	body := `{"email":"person@example.com","password":"a-long-example-password"}`
+
+	// First 5 requests from 198.51.100.10 should succeed (201 Created)
+	for i := 1; i <= 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "198.51.100.10:1234"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("request %d expected 201 Created, got %d", i, w.Code)
+		}
+	}
+
+	if count := executionCount.Load(); count != 5 {
+		t.Fatalf("expected 5 usecase/hasher executions, got %d", count)
+	}
+
+	// 6th (N+1) request from same IP (different port) must be rate limited (429)
+	req6 := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(body))
+	req6.Header.Set("Content-Type", "application/json")
+	req6.RemoteAddr = "198.51.100.10:5678"
+	w6 := httptest.NewRecorder()
+	router.ServeHTTP(w6, req6)
+
+	if w6.Code != http.StatusTooManyRequests {
+		t.Fatalf("request 6 expected 429 Too Many Requests, got %d", w6.Code)
+	}
+	if w6.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on 429 response")
+	}
+
+	// CRITICAL REQUIREMENT: hasher/usecase is NEVER invoked for the rejected request!
+	if count := executionCount.Load(); count != 5 {
+		t.Fatalf("expected hasher/usecase to never be invoked on rejected request (count must remain 5, got %d)", count)
+	}
+
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w6.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("failed to decode 429 error response: %v", err)
+	}
+	if errResp.Error.Code != "rate_limited" {
+		t.Errorf("expected error code 'rate_limited', got %s", errResp.Error.Code)
+	}
+
+	// Request from a different IP should succeed
+	reqOther := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(body))
+	reqOther.Header.Set("Content-Type", "application/json")
+	reqOther.RemoteAddr = "198.51.100.20:1234"
+	wOther := httptest.NewRecorder()
+	router.ServeHTTP(wOther, reqOther)
+
+	if wOther.Code != http.StatusCreated {
+		t.Fatalf("request from different IP expected 201 Created, got %d", wOther.Code)
+	}
+	if count := executionCount.Load(); count != 6 {
+		t.Fatalf("expected 6 executions after different IP request, got %d", count)
 	}
 }

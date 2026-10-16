@@ -50,6 +50,7 @@ type registerResponse struct {
 // @Failure 409 {object} errorResponse "Account with this canonical email already exists"
 // @Failure 413 {object} errorResponse "Request body exceeds limit"
 // @Failure 415 {object} errorResponse "Content-Type must be application/json"
+// @Failure 429 {object} errorResponse "Rate limit exceeded"
 // @Failure 500 {object} errorResponse "Internal server error"
 // @Failure 503 {object} errorResponse "Service temporarily unavailable, please retry"
 // @Router /v1/auth/register [post]

@@ -11,5 +11,6 @@ Index of ADRs in docs/adr/.
 - 0007: Account session management and concurrency design
 - 0008: Email verification token and SMTP delivery policy (accepted; implemented in AUTH-05)
 - 0009: Password recovery by email (accepted for AUTH-06)
+- 0010: Client IP resolution and trusted proxy boundaries (accepted for AUTH-07)
 
 Add a line here for every new ADR.

@@ -717,6 +717,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/http.errorResponse"
                         }
                     },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/http.errorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
