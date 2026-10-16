@@ -10,8 +10,8 @@
 - Files: services/auth/internal/delivery/http/middleware/client_ip.go, services/auth/internal/delivery/http/middleware/client_ip_test.go, services/auth/internal/delivery/http/middleware/rate_limit.go, services/auth/internal/delivery/http/middleware/rate_limit_test.go, services/auth/internal/delivery/http/register.go, services/auth/internal/delivery/http/register_test.go, services/auth/internal/delivery/http/email_verification.go, services/auth/internal/delivery/http/email_verification_test.go, services/auth/internal/delivery/http/router.go, services/auth/internal/platform/config/config.go, services/auth/internal/platform/config/config_test.go, services/auth/internal/app/wiring.go, services/auth/test/integration/email_verification_postgres_test.go, services/auth/api/docs.go, services/auth/api/swagger.json, services/auth/api/swagger.yaml, services/auth/.env.example, services/auth/README.md, docs/adr/0010-client-ip-and-trusted-proxies.md, .ai/decisions.md, .ai/prompts/auth-07-threat-model.md, .ai/tasks/current.md, .ai/journal.md.
 - Decisions: ADR 0010 (Client IP resolution and trusted proxy boundaries).
 - Problems: none; all tests pass.
-- Next: Commit, push branch feat/auth-07-hardening, and create PR.
-- Commit: pending
+- Next: Review and merge PR for feat/auth-07-hardening.
+- Commit: 2785d9d
 
 ### 2026-10-11 - S0.3-LOCAL-VERIFY - Validate GHCR workflow changes locally
 - Done: verified GitHub Actions workflow YAML and diff formatting; ran Auth unit/integration package tests, go vet, and gofmt checks.

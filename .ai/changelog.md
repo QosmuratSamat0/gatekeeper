@@ -1,5 +1,7 @@
 # Changelog
 
+- 2785d9d 2026-10-16 feat(auth): abuse hardening before deployment (AUTH-07) - Dedicated registration rate limiting, centralized trusted-proxy client IP resolver with IPv6 /64 normalization, caller session check on email verification resend, ADR 0010, and Swagger 2.0 update.
+
 - ae603f8 2026-10-11 fix(auth): remove unused test helper to satisfy golangci-lint - Cleaned up unused test helper and unreferenced imports in password recovery HTTP tests.
 
 - e4d9326 2026-10-11 feat(auth): implement password recovery by email (AUTH-06) - Bounded in-process delivery dispatcher, SHA-256 digest tokens, STARTTLS SMTP delivery, PostgreSQL migration and transactional repository, Argon2id password reset, session revocation, Swagger docs, concurrency hardening, and workflow_dispatch trigger.
