@@ -28,6 +28,7 @@ engineering portfolio.
 - Measure everything: RPS, p99, failure behavior.
 
 ## Status
-Current priority: Auth architecture and implementation by Gemini.
-Codex acts as architect and reviewer. See architecture/auth-access.md and
-tasks/current.md. Existing foundation work remains incomplete.
+Current priority: Stage 0 foundation, S0.3 — publish the Auth image to GHCR.
+AUTH-01 through AUTH-06 are implemented and manually verified; Gemini handles
+implementation, while Codex designs tasks and reviews results. See
+architecture/auth-access.md and tasks/current.md.

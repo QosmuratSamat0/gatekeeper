@@ -126,6 +126,52 @@ Interactive Swagger UI documentation is available at:
 Raw Swagger 2.0 JSON specification is available at:
 `http://127.0.0.1:8080/swagger/doc.json`.
 
+## Container Image & Registry (GHCR)
+
+Multi-architecture images (`linux/amd64`, `linux/arm64`) are automatically built and published to GitHub Container Registry on pushes to `main` following successful CI verification.
+
+- **Registry Image**: `ghcr.io/qosmuratsamat0/gatekeeper-auth`
+- **Tags & References**:
+  - `sha-<commit>`: Commit-specific tag matching the exact Git commit SHA (identifies source).
+  - `latest`: Rolling tag pointing to the most recent successful build on `main`.
+  - `ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:...`: Published manifest digest reference (recommended for strict immutable deployments and GitOps / Argo CD).
+
+### Pulling and Running the Image
+
+If the GHCR package is private, authenticate Docker using a personal access token (PAT) with least-privilege `read:packages` scope before pulling:
+
+```powershell
+# Log in to GitHub Container Registry (required if package is private; prompts securely without echoing PAT to shell history)
+$cred = Get-Credential -UserName 'YOUR_GITHUB_USERNAME' -Message "Enter GitHub PAT with read:packages scope as password"
+$cred.GetNetworkCredential().Password | docker login ghcr.io -u $cred.UserName --password-stdin
+
+
+
+
+# Or pull by published manifest digest for strict immutable deployments
+# docker pull ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+# Generate an ephemeral Ed25519 signing key for local smoke testing only (do not use in production)
+New-Item -ItemType Directory -Force -Path keys | Out-Null
+openssl genpkey -algorithm ed25519 -out keys/ed25519_private.pem
+
+# Run container with environment configuration
+# - HTTP_ADDR must be overridden to 0.0.0.0:8080 (otherwise .env.example default of 127.0.0.1 prevents container port exposure).
+# - DATABASE_URL must point to a database reachable from within the container (e.g. via a shared Docker network, a host network IP if accessible, or an external database; note that host.docker.internal will not reach PostgreSQL if it is bound strictly to loopback 127.0.0.1 on the host).
+# - JWT_PRIVATE_KEY_FILE in env must match the read-only mount path (/app/keys/ed25519_private.pem).
+docker run -d `
+  --name gatekeeper-auth `
+  -p 8080:8080 `
+  --env-file .env `
+  -e HTTP_ADDR=0.0.0.0:8080 `
+  -e JWT_PRIVATE_KEY_FILE=/app/keys/ed25519_private.pem `
+  -v ${PWD}/keys:/app/keys:ro `
+
+
+# Verify application health
+Invoke-RestMethod -Uri http://127.0.0.1:8080/healthz
+```
+
 ## Security Tradeoffs & Residual Risks
 1. **Account Enumeration**: Duplicate registration returns `409 account_exists`. This explicitly exposes whether an email address is already registered in exchange for immediate user feedback.
 2. **Rate Limiting**: Distributed rate limiting and brute-force protection are planned for the Gateway/Access layers. This registration endpoint must not be exposed to the public internet without an upstream reverse proxy or gateway providing abuse protection.

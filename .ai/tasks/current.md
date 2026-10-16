@@ -1,6 +1,6 @@
 # Current task
 
-## Current priority (2026-10-09)
+## Current priority (2026-10-11)
 - Done: record the Auth + Access target in architecture/auth-access.md.
 - Done: record Gateway target and middleware boundaries in architecture/gateway.md.
 - Auth first; Access implementation is deferred.
@@ -113,23 +113,26 @@
   * Tracked config template updated in `services/auth/.env.example` and documentation in `services/auth/README.md`.
   * Full Go test suite (`go test -v ./...`), `go vet ./...`, `gofmt -l .`, and `git diff --check` pass cleanly.
 - Done (2026-10-11): User manually tested the AUTH-06 password recovery flow and confirmed it works. All unit, dispatcher, and lifecycle tests pass.
-- Next: Record AUTH-06 commit hash and proceed to foundation S0.3 (GHCR image push).
+- Done: AUTH-06 is implemented, manually tested by the user, committed, and pushed to `origin/main`.
+- Done: [S0.3](s0-3-ghcr.md) — configured GitHub Actions CI/CD to publish multi-architecture Auth images (`linux/amd64`, `linux/arm64`) to GHCR (`ghcr.io/qosmuratsamat0/gatekeeper-auth`) on push to `main` with commit-specific `sha-<commit>` and moving `latest` tags after all test and security gates succeed (recommending the published manifest digest `ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:...` for strict immutable deployments). Updated CI verification to validate both commit tag and manifest digest, and write image summary to `$GITHUB_STEP_SUMMARY`. PR builds and local runs do not publish or log in. Documented container usage in `services/auth/README.md`.
+- Local verification (2026-10-11): YAML parse, `git diff --check`, `go test ./...`, `go vet ./...`, and `gofmt -l .` passed. Local `go test -race` could not start because CGO is disabled; `golangci-lint` is not installed; Docker build was blocked by access denied to the user-level Buildx lock. Hosted CI remains required.
+- Next: Authorized push to `main` to trigger live CI run and verify GHCR pull/publish.
 
-## Previous foundation task (pending)
-Stage 0, weeks 1-2: foundation.
-
-## Step S0.3 - GHCR image push (pending)
+## Step S0.3 - GHCR image push (implementation prepared)
 Build and push auth service container image to GitHub Container Registry (GHCR) on push to main with appropriate tagging.
 
 Deliverables:
-1. Update CI/CD workflow to authenticate with GHCR and push container images
-2. Verify image publishing and run
-3. .ai updates per Memory rule
+1. [x] Update CI/CD workflow to authenticate with GHCR and push container images (`.github/workflows/ci.yml`)
+2. [x] Document image publishing, tags, and run commands (`services/auth/README.md`)
+3. [ ] Verify image publishing and run on live GitHub push to `main`
+4. [x] .ai updates per Memory rule
 
 ## Done
 - Repo structure, .ai/, ADR 0001
 - S0.1b: approve chi router (ADR 0002)
 - S0.2: auth service skeleton, tests, Dockerfile, CI workflow
+- AUTH-01 through AUTH-06
+- S0.3: GHCR publishing workflow and documentation
 
 ## Next (after S0.3)
 - [ ] S0.4 k3s on Oracle Cloud + Argo CD

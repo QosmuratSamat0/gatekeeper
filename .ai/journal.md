@@ -1,5 +1,57 @@
 # Journal
 
+### 2026-10-11 - S0.3-LOCAL-VERIFY - Validate GHCR workflow changes locally
+- Done: verified GitHub Actions workflow YAML and diff formatting; ran Auth unit/integration package tests, go vet, and gofmt checks.
+- Files: `.ai/tasks/current.md`, `.ai/journal.md`.
+- Decisions: leave image publication and registry verification to the hosted workflow after an authorized push to `main`.
+- Problems: local race tests could not start because CGO is disabled; golangci-lint is unavailable; Docker build could not access the user-level Buildx lock under the sandbox.
+- Next: after authorization to push, confirm hosted CI and GHCR tag/digest verification; then run the documented container health smoke test.
+- Commit: pending
+
+### 2026-10-11 05:50 - S0.3-ACCURACY-FIX - Clarified commit tags vs manifest digest immutability and enhanced CI verification
+- Done: addressed technical accuracy fix regarding tag immutability:
+  1. Updated `.ai/tasks/s0-3-ghcr.md`, `.ai/tasks/current.md`, and `services/auth/README.md` to classify `sha-<commit>` as a commit-specific tag that identifies source (noting tags are not strictly immutable unless registry policy enforces it), and recommended the published manifest digest (`ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:...`) for strict immutable deployments and GitOps / Argo CD.
+  2. In `.github/workflows/ci.yml`, assigned `id: build` to the Buildx build-and-push step, updated the post-publish verification step to pull and inspect the published image by digest (`${{ steps.build.outputs.digest }}`) as well as by commit tag, and wrote image metadata (image name, commit tag, latest tag, digest reference, and digest) to `$GITHUB_STEP_SUMMARY`.
+  3. Preserved least-privilege workflow permissions and `main`-push conditional execution.
+- Files: .ai/tasks/s0-3-ghcr.md, .ai/tasks/current.md, services/auth/README.md, .github/workflows/ci.yml, .ai/journal.md.
+- Decisions: distinguish commit-specific source tags from immutable manifest digests; verify published multi-arch manifest by both tag and digest; export image metadata to GitHub Actions step summary.
+- Problems: none.
+- Next: Authorized push to `main` to trigger live CI run and verify GHCR pull/publish.
+- Commit: pending
+
+### 2026-10-11 05:45 - S0.3-REVIEW-FIXES - Hardened CI workflow permissions and corrected README PowerShell syntax
+- Done: applied review fixes for S0.3:
+  1. Added workflow-level `permissions: contents: read` to `.github/workflows/ci.yml` ensuring the `auth` test job runs with least privilege, while keeping the `publish-ghcr` job's explicit `contents: read, packages: write`.
+  2. In `services/auth/README.md`, quoted the `Get-Credential -UserName 'YOUR_GITHUB_USERNAME'` placeholder, replaced `sha-<commit>` command placeholders with valid example tags (`sha-0123456789abcdef`) and usage instructions, and clarified container `DATABASE_URL` reachability (noting loopback isolation caveats with `host.docker.internal`).
+- Files: .github/workflows/ci.yml, services/auth/README.md, .ai/journal.md.
+- Decisions: enforce default least-privilege workflow permissions in GitHub Actions; ensure PowerShell example commands are syntactically valid and accurately guide network topology.
+- Problems: none.
+- Next: Authorized push to main to verify live CI run and GHCR publication.
+- Commit: pending
+
+### 2026-10-11 05:40 - S0.3-DOCS-UPDATE - Hardened GHCR login and container execution documentation
+- Done: updated services/auth/README.md with safe PowerShell Get-Credential GHCR login (avoiding shell history token leakage), HTTP_ADDR=0.0.0.0:8080 override for Docker port binding, container-reachable DATABASE_URL notice, and matched read-only signing key mount path.
+- Files: services/auth/README.md, .ai/journal.md.
+- Decisions: use PowerShell Get-Credential for non-echoed PAT authentication; document mandatory container network requirements for HTTP_ADDR and DATABASE_URL.
+- Problems: none.
+- Next: Authorized push to main to verify live GHCR publication.
+- Commit: pending
+
+### 2026-10-11 05:35 - S0.3-GHCR-PREPARE - Prepared multi-arch GHCR publishing workflow, verification, and container documentation
+- Done: configured GitHub Actions CI/CD to publish multi-architecture Auth container images to GHCR (`ghcr.io/qosmuratsamat0/gatekeeper-auth`) upon push to `main` following successful CI test and security gates:
+  1. Configured least-privilege permissions: root/test job runs with standard permissions; `publish-ghcr` job explicitly requests `contents: read` and `packages: write`.
+  2. Guarded publishing job with `needs: auth` and conditional `github.event_name == 'push' && github.ref == 'refs/heads/main'` ensuring pull requests and branch builds do not authenticate or publish to GHCR.
+  3. Integrated QEMU and pinned stable maintained Buildx action `docker/build-push-action@v6` for `linux/amd64` and `linux/arm64`.
+  4. Configured tags for immutable `sha-<commit>` and moving `latest`.
+  5. Added post-publish verification step in CI to pull the exact SHA-tagged image and inspect manifest platforms (`linux/amd64`, `linux/arm64`).
+  6. Documented image reference, private package login via least-privilege `read:packages` token, ephemeral signing key generation, and container execution instructions in `services/auth/README.md`.
+  7. Preserved all existing gates (Swagger verification, PostgreSQL migrations, race-detector tests, golangci-lint, local Docker build, Trivy vulnerability scan).
+- Files: .github/workflows/ci.yml, services/auth/README.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: image publishing separated into an independent downstream job with scoped credentials; GHCR login performed solely via ephemeral `GITHUB_TOKEN`; pull + multi-arch manifest verification automated in CI while live run check remains manual in local/ephemeral environment with generated keys.
+- Problems: none. Local diff and YAML validation pass cleanly.
+- Next: Authorized push to `main` to trigger workflow execution and verify live GHCR publish and pull.
+- Commit: pending
+
 ### 2026-10-11 03:45 - AUTH-06-LINT-FIX - Removed unused helper from HTTP password recovery test
 - Done: removed `unusedBuffers` function and unused `bytes` and `errors` imports from `password_recovery_test.go` to satisfy the `unused` linter in `golangci-lint`.
 - Files: services/auth/internal/delivery/http/password_recovery_test.go, .ai/journal.md.
@@ -523,3 +575,10 @@
 - Problems: None.
 - Next: Push the fix after verifying origin/main and running the pre-push hook.
 - Commit: pending.
+### 2026-10-11 - S0.3-PLAN - Prepare GHCR image publishing task
+- Done: Reviewed current project status, Auth Dockerfile, existing GitHub Actions workflow, and deployment architecture; prepared the Gemini task brief for publishing the Auth image to GHCR.
+- Files: `.ai/tasks/s0-3-ghcr.md`, `.ai/tasks/current.md`, `.ai/project.md`, `.ai/journal.md`.
+- Decisions: Keep PR CI build-and-scan only; publish from `main` after CI passes using least-privilege `GITHUB_TOKEN`; publish amd64 and arm64 images with immutable SHA and `latest` tags, matching the Oracle ARM deployment target.
+- Problems: `.ai/project.md` still described Auth as the current priority, so it was synchronized with `.ai/tasks/current.md`.
+- Next: User reviews the S0.3 plan; after approval, Gemini implements it and Codex reviews the workflow and verification evidence.
+- Commit: pending

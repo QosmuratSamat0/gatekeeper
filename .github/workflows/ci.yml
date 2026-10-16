@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   auth:
     name: Auth Service CI
@@ -74,3 +77,72 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
+
+  publish-ghcr:
+    name: Publish Auth Image to GHCR
+    needs: auth
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: services/auth
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/qosmuratsamat0/gatekeeper-auth:sha-${{ github.sha }}
+            ghcr.io/qosmuratsamat0/gatekeeper-auth:latest
+
+      - name: Verify image pull and multi-arch manifest
+        env:
+          IMAGE_NAME: ghcr.io/qosmuratsamat0/gatekeeper-auth
+          IMAGE_TAG: ghcr.io/qosmuratsamat0/gatekeeper-auth:sha-${{ github.sha }}
+          IMAGE_LATEST: ghcr.io/qosmuratsamat0/gatekeeper-auth:latest
+          IMAGE_DIGEST_REF: ghcr.io/qosmuratsamat0/gatekeeper-auth@${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Pulling published image by commit tag: ${IMAGE_TAG}"
+          docker pull "${IMAGE_TAG}"
+          echo "Pulling published image by digest reference: ${IMAGE_DIGEST_REF}"
+          docker pull "${IMAGE_DIGEST_REF}"
+          echo "Inspecting manifest for supported platforms (by commit tag)..."
+          MANIFEST_TAG=$(docker buildx imagetools inspect "${IMAGE_TAG}")
+          echo "${MANIFEST_TAG}"
+          echo "${MANIFEST_TAG}" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in tag manifest"; exit 1; }
+          echo "${MANIFEST_TAG}" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in tag manifest"; exit 1; }
+          echo "Inspecting manifest for supported platforms (by digest)..."
+          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE_DIGEST_REF}")
+          echo "${MANIFEST_DIGEST}"
+          echo "${MANIFEST_DIGEST}" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in digest manifest"; exit 1; }
+          echo "${MANIFEST_DIGEST}" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in digest manifest"; exit 1; }
+          echo "Manifest multi-architecture verification passed."
+          {
+            echo "### Published Auth Container Image"
+            echo "- **Image Name:** \`${IMAGE_NAME}\`"
+            echo "- **Commit Tag:** \`${IMAGE_TAG}\`"
+            echo "- **Latest Tag:** \`${IMAGE_LATEST}\`"
+            echo "- **Digest Reference:** \`${IMAGE_DIGEST_REF}\`"
+            echo "- **Digest:** \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
