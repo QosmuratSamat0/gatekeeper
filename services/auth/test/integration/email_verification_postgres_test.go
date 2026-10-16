@@ -2,7 +2,15 @@ package integration_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,9 +18,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	delivery "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/delivery/http"
 	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/domain"
+	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/password"
 	tokenplatform "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/platform/token"
 	repo "github.com/QosmuratSamat0/gatekeeper/services/auth/internal/repository/postgres"
+	"github.com/QosmuratSamat0/gatekeeper/services/auth/internal/usecase"
 )
 
 func createTestAccountInDB(t *testing.T, pool repo.PgxPoolExecutor) (string, string) {
@@ -442,4 +453,161 @@ func TestPostgres_IssueVerificationToken_AlreadyVerified(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatalf("expected 0 token rows for verified account, got %d", count)
 	}
+}
+
+type mockIntegrationEmailSender struct {
+	mu        sync.Mutex
+	sentCount int
+}
+
+func (m *mockIntegrationEmailSender) SendVerificationEmail(ctx context.Context, toEmail, token string, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sentCount++
+	return nil
+}
+
+func (m *mockIntegrationEmailSender) SendPasswordResetEmail(ctx context.Context, toEmail, token string, expiresAt time.Time) error {
+	return nil
+}
+
+// TestPostgres_EmailVerificationRequest_RevokedSessionReturns401 tests that requesting an email
+// verification token using an access token whose session was revoked via logout-all returns 401
+// Unauthorized and sends zero emails, whereas an active valid session succeeds with 202 Accepted.
+func TestPostgres_EmailVerificationRequest_RevokedSessionReturns401(t *testing.T) {
+	pool, _, cleanup := setupDisposableTestDB(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	accountRepo := repo.NewAccountRepository(pool, 5*time.Second)
+	sessionRepo := repo.NewSessionRepository(pool, 5*time.Second)
+	verificationRepo := repo.NewEmailVerificationRepository(pool, 5*time.Second)
+
+	hasher := password.NewArgon2idHasherWithParams(1024, 1, 1, 16, 32, 2)
+	dummyHash, err := hasher.Hash(ctx, "dummy-test-password")
+	if err != nil {
+		t.Fatalf("failed to create dummy hash: %v", err)
+	}
+
+	_, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
+	tokenSvc, err := tokenplatform.NewTokenService("gatekeeper-auth", "gatekeeper-services", "key-test-1", privKey, nil, 10*time.Minute, nil)
+	if err != nil {
+		t.Fatalf("failed to create token service: %v", err)
+	}
+
+	sender := &mockIntegrationEmailSender{}
+	emailTokenMgr := tokenplatform.NewEmailVerificationTokenManager()
+	refreshMgr := tokenplatform.NewRefreshTokenManager()
+
+	registerUC := usecase.NewRegisterUsecase(accountRepo, hasher, nil, nil, verificationRepo, emailTokenMgr, sender, 24*time.Hour)
+	loginUC, err := usecase.NewLoginUsecase(accountRepo, sessionRepo, hasher, tokenSvc, refreshMgr, dummyHash, 10*time.Minute, 720*time.Hour, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create login usecase: %v", err)
+	}
+	meUC, _ := usecase.NewCurrentAccountUsecase(sessionRepo, nil)
+	logoutAllUC, _ := usecase.NewLogoutAllUsecase(sessionRepo)
+	emailVerificationUC := usecase.NewEmailVerificationUsecase(verificationRepo, emailTokenMgr, sender, 24*time.Hour, 60*time.Second)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := delivery.NewHandler(logger, pool, registerUC, loginUC, nil, meUC, nil, &testTokenAdapter{tokenSvc: tokenSvc}, tokenSvc, nil, nil, nil).
+		WithSessionManagement(nil, nil, logoutAllUC).
+		WithEmailVerification(emailVerificationUC, emailVerificationUC, nil)
+	router := handler.Routes()
+
+	// 1. Register new account (sends initial verification email)
+	regBody := `{"email":"resend.test@example.com","password":"valid-password-123"}`
+	regReq := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(regBody))
+	regReq.Header.Set("Content-Type", "application/json")
+	wReg := httptest.NewRecorder()
+	router.ServeHTTP(wReg, regReq)
+
+	if wReg.Code != http.StatusCreated {
+		t.Fatalf("registration failed: %d: %s", wReg.Code, wReg.Body.String())
+	}
+	sender.mu.Lock()
+	if sender.sentCount != 1 {
+		t.Fatalf("expected 1 verification email sent on registration, got %d", sender.sentCount)
+	}
+	sender.mu.Unlock()
+
+	// 2. Login to obtain access token
+	loginBody := `{"email":"resend.test@example.com","password":"valid-password-123"}`
+	loginReq := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	wLogin := httptest.NewRecorder()
+	router.ServeHTTP(wLogin, loginReq)
+
+	if wLogin.Code != http.StatusOK {
+		t.Fatalf("login failed: %d: %s", wLogin.Code, wLogin.Body.String())
+	}
+
+	var loginResp struct {
+		AccessToken string `json:"access_token"`
+		Account     struct {
+			ID string `json:"id"`
+		} `json:"account"`
+	}
+	if err := json.Unmarshal(wLogin.Body.Bytes(), &loginResp); err != nil {
+		t.Fatalf("failed to parse login response: %v", err)
+	}
+
+	// 3. Reset cooldown in database to allow immediate resend
+	_, err = pool.Exec(ctx, "UPDATE email_verification_tokens SET created_at = clock_timestamp() - interval '2 minutes' WHERE account_id = $1", loginResp.Account.ID)
+	if err != nil {
+		t.Fatalf("failed to reset cooldown: %v", err)
+	}
+
+	// 4. Request email verification resend with active session -> must return 202 Accepted
+	resendReq := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+	resendReq.Header.Set("Authorization", "Bearer "+loginResp.AccessToken)
+	wResend := httptest.NewRecorder()
+	router.ServeHTTP(wResend, resendReq)
+
+	if wResend.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted with active session, got %d: %s", wResend.Code, wResend.Body.String())
+	}
+	sender.mu.Lock()
+	if sender.sentCount != 2 {
+		t.Fatalf("expected 2 total emails sent, got %d", sender.sentCount)
+	}
+	sender.mu.Unlock()
+
+	// 5. Revoke all sessions via logout-all
+	logoutReq := httptest.NewRequest(http.MethodPost, "/v1/auth/logout-all", nil)
+	logoutReq.Header.Set("Authorization", "Bearer "+loginResp.AccessToken)
+	wLogout := httptest.NewRecorder()
+	router.ServeHTTP(wLogout, logoutReq)
+
+	if wLogout.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 No Content for logout-all, got %d: %s", wLogout.Code, wLogout.Body.String())
+	}
+
+	// 6. Reset cooldown again in database so cooldown does not mask the session check
+	_, err = pool.Exec(ctx, "UPDATE email_verification_tokens SET created_at = clock_timestamp() - interval '2 minutes' WHERE account_id = $1", loginResp.Account.ID)
+	if err != nil {
+		t.Fatalf("failed to reset cooldown: %v", err)
+	}
+
+	// 7. Request email verification resend with the revoked session's token -> MUST return 401 Unauthorized
+	resendReqRevoked := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+	resendReqRevoked.Header.Set("Authorization", "Bearer "+loginResp.AccessToken)
+	wResendRevoked := httptest.NewRecorder()
+	router.ServeHTTP(wResendRevoked, resendReqRevoked)
+
+	if wResendRevoked.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for revoked session, got %d: %s", wResendRevoked.Code, wResendRevoked.Body.String())
+	}
+
+	// CRITICAL: zero additional emails sent after revoked session attempt!
+	sender.mu.Lock()
+	if sender.sentCount != 2 {
+		t.Fatalf("expected sentCount to remain 2, got %d (email was sent for revoked session!)", sender.sentCount)
+	}
+	sender.mu.Unlock()
 }

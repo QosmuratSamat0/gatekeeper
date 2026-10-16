@@ -100,6 +100,8 @@ type Handler struct {
 	confirmResetUC          PasswordResetConfirmService
 	resetReqLimiter         *authmiddleware.IPRateLimiter
 	resetConfLimiter        *authmiddleware.IPRateLimiter
+	registerLimiter         *authmiddleware.IPRateLimiter
+	ipResolver              *authmiddleware.ClientIPResolver
 }
 
 // NewHandler creates a new Handler instance with all injected usecases and platform adapters.
@@ -171,6 +173,18 @@ func (h *Handler) WithPasswordRecovery(
 	return h
 }
 
+// WithRegistrationRateLimiter configures the registration rate limiter on the Handler.
+func (h *Handler) WithRegistrationRateLimiter(limiter *authmiddleware.IPRateLimiter) *Handler {
+	h.registerLimiter = limiter
+	return h
+}
+
+// WithClientIPResolver configures the client IP resolver on the Handler.
+func (h *Handler) WithClientIPResolver(resolver *authmiddleware.ClientIPResolver) *Handler {
+	h.ipResolver = resolver
+	return h
+}
+
 // Routes constructs the HTTP router and registers public and probe routes.
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
@@ -202,15 +216,20 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/.well-known/jwks.json", h.JWKS)
 	}
 
-	// Public registration endpoint
+	// Public registration endpoint with per-IP rate limiting applied before body decoding and Argon2id hashing
 	if h.registerUC != nil {
-		r.Post("/v1/auth/register", h.Register)
+		if h.registerLimiter != nil {
+			r.With(authmiddleware.RateLimitMiddleware(h.registerLimiter, h.ipResolver, "Too many registration attempts. Please try again later.")).
+				Post("/v1/auth/register", h.Register)
+		} else {
+			r.Post("/v1/auth/register", h.Register)
+		}
 	}
 
 	// Public login endpoint with per-IP rate limiting applied before password verification
 	if h.loginUC != nil {
 		if h.rateLimiter != nil {
-			r.With(authmiddleware.RateLimitLoginMiddleware(h.rateLimiter)).Post("/v1/auth/login", h.Login)
+			r.With(authmiddleware.RateLimitLoginMiddleware(h.rateLimiter, h.ipResolver)).Post("/v1/auth/login", h.Login)
 		} else {
 			r.Post("/v1/auth/login", h.Login)
 		}
@@ -219,7 +238,7 @@ func (h *Handler) Routes() http.Handler {
 	// Public refresh endpoint with per-IP rate limiting applied before DB lookup
 	if h.refreshUC != nil {
 		if h.refreshLimiter != nil {
-			r.With(authmiddleware.RateLimitMiddleware(h.refreshLimiter, "Too many refresh attempts. Please try again later.")).Post("/v1/auth/refresh", h.Refresh)
+			r.With(authmiddleware.RateLimitMiddleware(h.refreshLimiter, h.ipResolver, "Too many refresh attempts. Please try again later.")).Post("/v1/auth/refresh", h.Refresh)
 		} else {
 			r.Post("/v1/auth/refresh", h.Refresh)
 		}
@@ -229,7 +248,7 @@ func (h *Handler) Routes() http.Handler {
 	// Placed outside unconditional BearerAuth middleware so refresh-mode logout is supported after access token expiry.
 	if h.logoutUC != nil {
 		if h.logoutLimiter != nil {
-			r.With(authmiddleware.RateLimitMiddleware(h.logoutLimiter, "Too many logout attempts. Please try again later.")).Post("/v1/auth/logout", h.Logout)
+			r.With(authmiddleware.RateLimitMiddleware(h.logoutLimiter, h.ipResolver, "Too many logout attempts. Please try again later.")).Post("/v1/auth/logout", h.Logout)
 		} else {
 			r.Post("/v1/auth/logout", h.Logout)
 		}
@@ -238,7 +257,7 @@ func (h *Handler) Routes() http.Handler {
 	// Public email verification confirmation endpoint with per-IP rate limiting
 	if h.emailVerificationConfUC != nil {
 		if h.confirmLimiter != nil {
-			r.With(authmiddleware.RateLimitMiddleware(h.confirmLimiter, "Too many verification attempts. Please try again later.")).
+			r.With(authmiddleware.RateLimitMiddleware(h.confirmLimiter, h.ipResolver, "Too many verification attempts. Please try again later.")).
 				Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
 		} else {
 			r.Post("/v1/auth/email/verification/confirm", h.ConfirmEmailVerification)
@@ -248,7 +267,7 @@ func (h *Handler) Routes() http.Handler {
 	// Public password reset request endpoint with per-IP rate limiting
 	if h.requestResetUC != nil {
 		if h.resetReqLimiter != nil {
-			r.With(authmiddleware.RateLimitMiddleware(h.resetReqLimiter, "Too many password reset requests. Please try again later.")).
+			r.With(authmiddleware.RateLimitMiddleware(h.resetReqLimiter, h.ipResolver, "Too many password reset requests. Please try again later.")).
 				Post("/v1/auth/password-reset/request", h.RequestPasswordReset)
 		} else {
 			r.Post("/v1/auth/password-reset/request", h.RequestPasswordReset)
@@ -258,7 +277,7 @@ func (h *Handler) Routes() http.Handler {
 	// Public password reset confirm endpoint with per-IP rate limiting
 	if h.confirmResetUC != nil {
 		if h.resetConfLimiter != nil {
-			r.With(authmiddleware.RateLimitMiddleware(h.resetConfLimiter, "Too many password reset attempts. Please try again later.")).
+			r.With(authmiddleware.RateLimitMiddleware(h.resetConfLimiter, h.ipResolver, "Too many password reset attempts. Please try again later.")).
 				Post("/v1/auth/password-reset/confirm", h.ConfirmPasswordReset)
 		} else {
 			r.Post("/v1/auth/password-reset/confirm", h.ConfirmPasswordReset)

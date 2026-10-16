@@ -116,16 +116,24 @@
 - Done: AUTH-06 is implemented, manually tested by the user, committed, and pushed to `origin/main`.
 - Done: [S0.3](s0-3-ghcr.md) — configured GitHub Actions CI/CD to publish multi-architecture Auth images (`linux/amd64`, `linux/arm64`) to GHCR (`ghcr.io/qosmuratsamat0/gatekeeper-auth`) on push to `main` with commit-specific `sha-<commit>` and moving `latest` tags after all test and security gates succeed (recommending the published manifest digest `ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:...` for strict immutable deployments). Updated CI verification to validate both commit tag and manifest digest, and write image summary to `$GITHUB_STEP_SUMMARY`. PR builds and local runs do not publish or log in. Documented container usage in `services/auth/README.md`.
 - Local verification (2026-10-11): YAML parse, `git diff --check`, `go test ./...`, `go vet ./...`, and `gofmt -l .` passed. Local `go test -race` could not start because CGO is disabled; `golangci-lint` is not installed; Docker build was blocked by access denied to the user-level Buildx lock. Hosted CI remains required.
-- Next: Authorized push to `main` to trigger live CI run and verify GHCR pull/publish.
+- Done (2026-10-16): S0.3 pushed to `main`; live CI run 38915671921 succeeded (Auth CI + GHCR publish); `ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:ad10ef1323494847e5907c05e9250ae77a02e94c8c76218a9beb89961e823ef5`, linux/amd64 + linux/arm64 verified by tag and digest.
+- Done (2026-10-16): [AUTH-07](auth-07.md) — abuse hardening before deployment implemented:
+  * Dedicated `IPRateLimiter` on `POST /v1/auth/register` before body decoding and Argon2id hashing (default 5 attempts/min, configurable via `REGISTER_RATE_LIMIT_ATTEMPTS` [1-1000] and `REGISTER_RATE_LIMIT_WINDOW`). Returns 429 `rate_limited` with standard error envelope and `Retry-After`.
+  * Centralized `ClientIPResolver` in `delivery/http/middleware`: configurable via `TRUSTED_PROXY_CIDRS` (comma-separated CIDR subnets, default empty). Ignores forwarding headers when empty or when direct peer is untrusted. When direct peer is trusted, traverses `X-Forwarded-For` right-to-left skipping trusted proxies and returning first untrusted IP. Normalizes keys: IPv4 as-is, IPv4-mapped IPv6 unmapped to IPv4, IPv6 masked to `/64` prefix.
+  * Caller session validity check on `POST /v1/auth/email/verification/request`: verifies active session via `currentAccountUC.Execute`, returning 401 `unauthorized` if session is revoked, expired, or missing, without altering `BearerAuth` (preserving idempotent logout).
+  * Generated Swagger 2.0 specifications via pinned Swag v1.16.4 (`api/docs.go`, `api/swagger.json`, `api/swagger.yaml`) documenting 429 on registration.
+  * Comprehensive table-driven tests for client IP resolution, config validation, registration rate limiting with counting fake hasher, and session checks on email verification resend.
+  * Added ADR 0010 in `docs/adr/0010-client-ip-and-trusted-proxies.md`, updated `.ai/decisions.md`, `.env.example`, `services/auth/README.md`, and added threat model note in `.ai/prompts/auth-07-threat-model.md`.
+- Next: Review and merge PR for AUTH-07; proceed to S0.4 (k3s on Oracle Cloud + Argo CD).
 
-## Step S0.3 - GHCR image push (implementation prepared)
-Build and push auth service container image to GitHub Container Registry (GHCR) on push to main with appropriate tagging.
-
+## Step AUTH-07 - Abuse hardening before deployment (completed)
 Deliverables:
-1. [x] Update CI/CD workflow to authenticate with GHCR and push container images (`.github/workflows/ci.yml`)
-2. [x] Document image publishing, tags, and run commands (`services/auth/README.md`)
-3. [ ] Verify image publishing and run on live GitHub push to `main`
-4. [x] .ai updates per Memory rule
+1. [x] Dedicated registration rate limit with configurable attempts and window
+2. [x] Centralized trusted-proxy client IP resolver with right-to-left XFF traversal and IPv6 /64 normalization
+3. [x] Session validity check on email verification resend (401 unauthorized for revoked/expired sessions)
+4. [x] Swagger 2.0 specs regenerated with pinned Swag v1.16.4
+5. [x] Unit, integration, and HTTP tests
+6. [x] ADR 0010, decisions index, threat model note, .env.example, README, and .ai updates
 
 ## Done
 - Repo structure, .ai/, ADR 0001
@@ -133,8 +141,9 @@ Deliverables:
 - S0.2: auth service skeleton, tests, Dockerfile, CI workflow
 - AUTH-01 through AUTH-06
 - S0.3: GHCR publishing workflow and documentation
+- AUTH-07: abuse hardening before deployment (branch `feat/auth-07-hardening`)
 
-## Next (after S0.3)
+## Next (after AUTH-07)
 - [ ] S0.4 k3s on Oracle Cloud + Argo CD
 - [ ] S0.5 Prometheus/Grafana + k6 baseline
 

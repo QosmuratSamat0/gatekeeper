@@ -73,6 +73,15 @@ func TestConfigLoad(t *testing.T) {
 		if cfg.LoginRateLimitAttempts != 10 {
 			t.Errorf("expected 10, got %d", cfg.LoginRateLimitAttempts)
 		}
+		if cfg.RegisterRateLimitAttempts != 5 {
+			t.Errorf("expected 5, got %d", cfg.RegisterRateLimitAttempts)
+		}
+		if cfg.RegisterRateLimitWindow != time.Minute {
+			t.Errorf("expected 1m, got %v", cfg.RegisterRateLimitWindow)
+		}
+		if len(cfg.TrustedProxyCIDRs) != 0 {
+			t.Errorf("expected 0 trusted proxy CIDRs by default, got %d", len(cfg.TrustedProxyCIDRs))
+		}
 	})
 
 	t.Run("validates custom valid parameters", func(t *testing.T) {
@@ -87,6 +96,9 @@ func TestConfigLoad(t *testing.T) {
 		t.Setenv("JWT_ISSUER", "custom-issuer")
 		t.Setenv("JWT_AUDIENCE", "custom-audience")
 		t.Setenv("JWT_ACTIVE_KID", "key-custom")
+		t.Setenv("REGISTER_RATE_LIMIT_ATTEMPTS", "25")
+		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "2m")
+		t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.1.0/24, fd00::/8")
 
 		cfg, err := config.Load()
 		if err != nil {
@@ -100,6 +112,61 @@ func TestConfigLoad(t *testing.T) {
 		}
 		if cfg.JWTIssuer != "custom-issuer" {
 			t.Errorf("expected custom-issuer, got %s", cfg.JWTIssuer)
+		}
+		if cfg.RegisterRateLimitAttempts != 25 {
+			t.Errorf("expected 25, got %d", cfg.RegisterRateLimitAttempts)
+		}
+		if cfg.RegisterRateLimitWindow != 2*time.Minute {
+			t.Errorf("expected 2m, got %v", cfg.RegisterRateLimitWindow)
+		}
+		if len(cfg.TrustedProxyCIDRs) != 3 {
+			t.Errorf("expected 3 trusted CIDRs, got %d", len(cfg.TrustedProxyCIDRs))
+		}
+	})
+
+	t.Run("validates REGISTER_RATE_LIMIT_* bounds and TRUSTED_PROXY_CIDRS", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/auth?sslmode=disable")
+		t.Setenv("JWT_PRIVATE_KEY_FILE", "keys/private.pem")
+
+		// Register attempts too low (< 1)
+		t.Setenv("REGISTER_RATE_LIMIT_ATTEMPTS", "0")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for REGISTER_RATE_LIMIT_ATTEMPTS < 1")
+		}
+
+		// Register attempts too high (> 1000)
+		t.Setenv("REGISTER_RATE_LIMIT_ATTEMPTS", "1001")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for REGISTER_RATE_LIMIT_ATTEMPTS > 1000")
+		}
+
+		// Register window non-positive
+		t.Setenv("REGISTER_RATE_LIMIT_ATTEMPTS", "5")
+		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "0s")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for non-positive REGISTER_RATE_LIMIT_WINDOW")
+		}
+
+		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "-10s")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for negative REGISTER_RATE_LIMIT_WINDOW")
+		}
+
+		// Invalid TRUSTED_PROXY_CIDRS (not a valid CIDR)
+		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "1m")
+		t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.1") // missing mask
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for IP without mask in TRUSTED_PROXY_CIDRS")
+		}
+
+		t.Setenv("TRUSTED_PROXY_CIDRS", "not-a-cidr")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for invalid string in TRUSTED_PROXY_CIDRS")
+		}
+
+		t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8,")
+		if _, err := config.Load(); err == nil {
+			t.Error("expected error for empty CIDR entry in list")
 		}
 	})
 

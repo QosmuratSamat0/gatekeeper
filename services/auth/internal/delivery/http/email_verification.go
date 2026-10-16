@@ -48,9 +48,34 @@ func (h *Handler) RequestEmailVerification(w http.ResponseWriter, r *http.Reques
 	// Derive caller identity exclusively from the verified Bearer token session.
 	// We never accept an email address or account ID from request parameters.
 	identity, ok := authmiddleware.GetAuthIdentity(r.Context())
-	if !ok || identity.AccountID == "" {
+	if !ok || identity.AccountID == "" || identity.SessionID == "" {
 		writeError(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 		return
+	}
+
+	// Verify that caller session remains active, not revoked, and not expired, matching /v1/auth/me.
+	if h.currentAccountUC != nil {
+		_, err := h.currentAccountUC.Execute(r.Context(), identity.AccountID, identity.SessionID)
+		if err != nil {
+			switch {
+			case errors.Is(err, domain.ErrSessionNotFound),
+				errors.Is(err, domain.ErrSessionRevoked),
+				errors.Is(err, domain.ErrSessionExpired),
+				errors.Is(err, domain.ErrInvalidCredentials):
+				writeError(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized")
+			case errors.Is(err, context.Canceled), errors.Is(r.Context().Err(), context.Canceled):
+				return
+			case errors.Is(err, domain.ErrDatabaseUnavailable),
+				errors.Is(err, context.DeadlineExceeded),
+				errors.Is(r.Context().Err(), context.DeadlineExceeded):
+				h.logSafeError("database_unavailable", r)
+				writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "Service temporarily unavailable, please retry")
+			default:
+				h.logSafeError("system_internal_failure", r)
+				writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error")
+			}
+			return
+		}
 	}
 
 	if h.emailVerificationReqUC == nil {

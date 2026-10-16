@@ -84,7 +84,7 @@ func TestIPRateLimiter_AntiEvictionProtection(t *testing.T) {
 
 func TestRateLimitLoginMiddleware_HTTPHandling(t *testing.T) {
 	limiter := NewIPRateLimiter(2, time.Minute, 10)
-	handler := RateLimitLoginMiddleware(limiter)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := RateLimitLoginMiddleware(limiter, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))

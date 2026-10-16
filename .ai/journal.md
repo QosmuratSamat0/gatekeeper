@@ -1,5 +1,18 @@
 # Journal
 
+### 2026-10-16 20:45 - AUTH-07-IMPL - Abuse hardening before deployment
+- Done: implemented AUTH-07 abuse hardening controls:
+  1. Dedicated IP rate limiting on `POST /v1/auth/register` before body decoding and Argon2id hashing, configurable via `REGISTER_RATE_LIMIT_ATTEMPTS` (default 5, 1-1000) and `REGISTER_RATE_LIMIT_WINDOW` (default 1m). Returns 429 `rate_limited` with standard error envelope and `Retry-After`.
+  2. Centralized `ClientIPResolver` in `delivery/http/middleware`: configurable via `TRUSTED_PROXY_CIDRS` (comma-separated CIDR subnets, default empty). Ignores forwarding headers when empty or when direct peer is untrusted. When direct peer is trusted, traverses `X-Forwarded-For` right-to-left skipping trusted proxies and returning first untrusted IP. Normalizes keys: IPv4 as-is, IPv4-mapped IPv6 unmapped to IPv4, IPv6 masked to `/64` prefix to block table exhaustion.
+  3. Caller session validity check on `POST /v1/auth/email/verification/request`: verifies active session via `currentAccountUC.Execute`, returning 401 `unauthorized` if session is revoked, expired, or missing.
+  4. Regenerated Swagger 2.0 contracts with pinned Swag v1.16.4 adding 429 response to `/v1/auth/register`.
+  5. Added ADR 0010, updated decisions index, documented environment variables in `.env.example` and `README.md`, and added threat model note in `.ai/prompts/auth-07-threat-model.md`.
+- Files: services/auth/internal/delivery/http/middleware/client_ip.go, services/auth/internal/delivery/http/middleware/client_ip_test.go, services/auth/internal/delivery/http/middleware/rate_limit.go, services/auth/internal/delivery/http/middleware/rate_limit_test.go, services/auth/internal/delivery/http/register.go, services/auth/internal/delivery/http/register_test.go, services/auth/internal/delivery/http/email_verification.go, services/auth/internal/delivery/http/email_verification_test.go, services/auth/internal/delivery/http/router.go, services/auth/internal/platform/config/config.go, services/auth/internal/platform/config/config_test.go, services/auth/internal/app/wiring.go, services/auth/test/integration/email_verification_postgres_test.go, services/auth/api/docs.go, services/auth/api/swagger.json, services/auth/api/swagger.yaml, services/auth/.env.example, services/auth/README.md, docs/adr/0010-client-ip-and-trusted-proxies.md, .ai/decisions.md, .ai/prompts/auth-07-threat-model.md, .ai/tasks/current.md, .ai/journal.md.
+- Decisions: ADR 0010 (Client IP resolution and trusted proxy boundaries).
+- Problems: none; all tests pass.
+- Next: Commit, push branch feat/auth-07-hardening, and create PR.
+- Commit: pending
+
 ### 2026-10-11 - S0.3-LOCAL-VERIFY - Validate GHCR workflow changes locally
 - Done: verified GitHub Actions workflow YAML and diff formatting; ran Auth unit/integration package tests, go vet, and gofmt checks.
 - Files: `.ai/tasks/current.md`, `.ai/journal.md`.

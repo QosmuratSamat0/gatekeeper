@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"encoding/json"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -114,20 +113,20 @@ type errorDetail struct {
 }
 
 // RateLimitMiddleware creates an HTTP middleware applying the bounded per-IP rate limit.
-// It extracts the client IP strictly from r.RemoteAddr without trusting client-controlled headers.
-func RateLimitMiddleware(limiter *IPRateLimiter, message string) func(http.Handler) http.Handler {
+// Client IP resolution and key normalization are delegated to the provided ClientIPResolver.
+// If resolver is nil, DefaultClientIPResolver is used (RemoteAddr only).
+func RateLimitMiddleware(limiter *IPRateLimiter, resolver *ClientIPResolver, message string) func(http.Handler) http.Handler {
+	if resolver == nil {
+		resolver = DefaultClientIPResolver
+	}
 	if message == "" {
 		message = "Too many requests. Please try again later."
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Extract client host from RemoteAddr (stripping port)
-			host, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				host = r.RemoteAddr
-			}
+			clientKey := resolver.ResolveClientIP(r)
 
-			allowed, _, retryAfter := limiter.Allow(host, time.Now())
+			allowed, _, retryAfter := limiter.Allow(clientKey, time.Now())
 			if !allowed {
 				reqID := middleware.GetReqID(r.Context())
 				w.Header().Set("Content-Type", "application/json")
@@ -149,6 +148,6 @@ func RateLimitMiddleware(limiter *IPRateLimiter, message string) func(http.Handl
 }
 
 // RateLimitLoginMiddleware creates an HTTP middleware applying the login attempts/minute IP rate limit.
-func RateLimitLoginMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
-	return RateLimitMiddleware(limiter, "Too many login attempts. Please try again later.")
+func RateLimitLoginMiddleware(limiter *IPRateLimiter, resolver *ClientIPResolver) func(http.Handler) http.Handler {
+	return RateLimitMiddleware(limiter, resolver, "Too many login attempts. Please try again later.")
 }

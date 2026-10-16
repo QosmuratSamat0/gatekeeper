@@ -170,6 +170,8 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		hasher,
 	)
 
+	ipResolver := authmiddleware.NewClientIPResolver(cfg.TrustedProxyCIDRs)
+	registerRateLimiter := authmiddleware.NewIPRateLimiter(cfg.RegisterRateLimitAttempts, cfg.RegisterRateLimitWindow, 10000)
 	loginRateLimiter := authmiddleware.NewIPRateLimiter(cfg.LoginRateLimitAttempts, cfg.LoginRateLimitWindow, 10000)
 	refreshRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
 	logoutRateLimiter := authmiddleware.NewIPRateLimiter(10, cfg.LoginRateLimitWindow, 10000)
@@ -192,6 +194,10 @@ func Wire(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 		loginRateLimiter,
 		refreshRateLimiter,
 		logoutRateLimiter,
+	).WithClientIPResolver(
+		ipResolver,
+	).WithRegistrationRateLimiter(
+		registerRateLimiter,
 	).WithSessionManagement(
 		listSessionsUC,
 		revokeSessionUC,

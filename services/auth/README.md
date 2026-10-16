@@ -2,21 +2,21 @@
 
 The `auth` service handles identity registration and credential persistence for Gatekeeper.
 
-## Scope (AUTH-01 through AUTH-06)
-- Account registration with email and password (`POST /v1/auth/register`).
+## Scope (AUTH-01 through AUTH-07)
+- Account registration with email and password (`POST /v1/auth/register`) with dedicated IP rate limiting (429 `rate_limited`).
 - User authentication and session issuance (`POST /v1/auth/login`).
 - Authenticated account profile retrieval (`GET /v1/auth/me`).
 - Idempotent session revocation (`POST /v1/auth/logout`).
 - Active sessions listing (`GET /v1/auth/sessions`) with keyset pagination.
 - Targeted session revocation (`DELETE /v1/auth/sessions/{session_id}`).
 - Account logout-all revocation (`POST /v1/auth/logout-all`).
-- Email verification request (`POST /v1/auth/email/verification/request`) and confirmation (`POST /v1/auth/email/verification/confirm`).
+- Email verification request (`POST /v1/auth/email/verification/request`) with caller session validation, and confirmation (`POST /v1/auth/email/verification/confirm`).
 - Password reset request (`POST /v1/auth/password-reset/request`) with generic 202 anti-enumeration response and bounded in-process asynchronous dispatch.
 - Password reset confirmation (`POST /v1/auth/password-reset/confirm`) with atomic credential update, session revocation, and generic 400 error.
 - Public JSON Web Key Set projection (`GET /.well-known/jwks.json`).
 - Asymmetrically signed access JWTs via Ed25519 / EdDSA (RFC 8037).
 - Secure password hashing and verification with Argon2id and shared concurrency limit.
-- Per-IP rate limiting (10 attempts/minute) on public endpoints.
+- Centralized trusted-proxy client IP resolver with right-to-left `X-Forwarded-For` traversal and IPv6 `/64` key normalization across all IP rate limiters.
 - Storage in PostgreSQL with schema migrations via `cmd/migrate`.
 - Health (`/healthz`) and database readiness (`/readyz`) probes.
 
@@ -48,6 +48,9 @@ The `auth` service handles identity registration and credential persistence for 
 | `ACCESS_TOKEN_TTL` | `10m` | Access token duration (1m to 15m) |
 | `LOGIN_RATE_LIMIT_ATTEMPTS` | `10` | Maximum login attempts per IP per window |
 | `LOGIN_RATE_LIMIT_WINDOW` | `1m` | Window duration for IP rate limiting |
+| `REGISTER_RATE_LIMIT_ATTEMPTS` | `5` | Maximum registration attempts per IP per window (1-1000) |
+| `REGISTER_RATE_LIMIT_WINDOW` | `1m` | Window duration for registration IP rate limiting |
+| `TRUSTED_PROXY_CIDRS` | `""` | Comma-separated list of trusted proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). **Security warning:** Set only to trusted reverse proxies/ingress networks; never client networks. When empty, `X-Forwarded-For` is ignored. |
 | `PASSWORD_RESET_TOKEN_TTL` | `30m` | Password reset token lifetime (5m to 24h) |
 | `PASSWORD_RESET_COOLDOWN` | `60s` | Cooldown between password reset requests for an account (10s to 10m) |
 | `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` | `45s` | Graceful shutdown drain timeout for in-process email delivery queue |

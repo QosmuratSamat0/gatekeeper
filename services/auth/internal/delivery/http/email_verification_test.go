@@ -54,6 +54,16 @@ func setupEmailVerificationTestRouter(
 	verifier authmiddleware.TokenVerifier,
 	limiter *authmiddleware.IPRateLimiter,
 ) http.Handler {
+	return setupEmailVerificationTestRouterWithAccount(reqUC, confUC, nil, verifier, limiter)
+}
+
+func setupEmailVerificationTestRouterWithAccount(
+	reqUC delivery.EmailVerificationRequestService,
+	confUC delivery.EmailVerificationConfirmService,
+	meSvc delivery.CurrentAccountService,
+	verifier authmiddleware.TokenVerifier,
+	limiter *authmiddleware.IPRateLimiter,
+) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	handler := delivery.NewHandler(
 		logger,
@@ -61,7 +71,7 @@ func setupEmailVerificationTestRouter(
 		nil,
 		nil,
 		nil,
-		nil,
+		meSvc,
 		nil,
 		verifier,
 		nil,
@@ -236,6 +246,99 @@ func TestEmailVerificationHandler_Request(t *testing.T) {
 		}
 		if rec.Code == http.StatusServiceUnavailable {
 			t.Fatalf("expected cancellation not to be treated as 503 Service Unavailable")
+		}
+	})
+
+	t.Run("rejects request if caller session is revoked with 401 and does not send email", func(t *testing.T) {
+		var reqInvoked bool
+		mockReq := &mockEmailVerificationReqService{
+			requestFn: func(ctx context.Context, accountID string) error {
+				reqInvoked = true
+				return nil
+			},
+		}
+		mockMe := &mockCurrentAccountService{
+			executeFn: func(ctx context.Context, accountID, sessionID string) (domain.Account, error) {
+				return domain.Account{}, domain.ErrSessionRevoked
+			},
+		}
+		router := setupEmailVerificationTestRouterWithAccount(mockReq, nil, mockMe, mockVerifier, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+		req.Header.Set("Authorization", "Bearer valid-token")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized for revoked session, got %d", rec.Code)
+		}
+		if reqInvoked {
+			t.Fatal("expected email verification request usecase never to be called for revoked session")
+		}
+		env := parseErrorEnvelope(t, rec.Body.Bytes())
+		if env.Error.Code != "unauthorized" {
+			t.Errorf("expected error code unauthorized, got %s", env.Error.Code)
+		}
+	})
+
+	t.Run("rejects request if caller session is expired or not found with 401", func(t *testing.T) {
+		for _, errSession := range []error{domain.ErrSessionExpired, domain.ErrSessionNotFound, domain.ErrInvalidCredentials} {
+			mockMe := &mockCurrentAccountService{
+				executeFn: func(ctx context.Context, accountID, sessionID string) (domain.Account, error) {
+					return domain.Account{}, errSession
+				},
+			}
+			var reqInvoked bool
+			mockReq := &mockEmailVerificationReqService{
+				requestFn: func(ctx context.Context, accountID string) error {
+					reqInvoked = true
+					return nil
+				},
+			}
+			router := setupEmailVerificationTestRouterWithAccount(mockReq, nil, mockMe, mockVerifier, nil)
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+			req.Header.Set("Authorization", "Bearer valid-token")
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 Unauthorized for %v, got %d", errSession, rec.Code)
+			}
+			if reqInvoked {
+				t.Fatalf("expected reqUC not called for %v", errSession)
+			}
+		}
+	})
+
+	t.Run("active session succeeds and invokes verification request usecase", func(t *testing.T) {
+		var reqInvoked bool
+		mockReq := &mockEmailVerificationReqService{
+			requestFn: func(ctx context.Context, accountID string) error {
+				reqInvoked = true
+				return nil
+			},
+		}
+		mockMe := &mockCurrentAccountService{
+			executeFn: func(ctx context.Context, accountID, sessionID string) (domain.Account, error) {
+				return domain.Account{ID: accountID, Status: domain.AccountStatusActive}, nil
+			},
+		}
+		router := setupEmailVerificationTestRouterWithAccount(mockReq, nil, mockMe, mockVerifier, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+		req.Header.Set("Authorization", "Bearer valid-token")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected 202 Accepted, got %d", rec.Code)
+		}
+		if !reqInvoked {
+			t.Fatal("expected email verification request usecase to be called for active session")
 		}
 	})
 }
