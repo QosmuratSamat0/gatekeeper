@@ -12,5 +12,6 @@ Index of ADRs in docs/adr/.
 - 0008: Email verification token and SMTP delivery policy (accepted; implemented in AUTH-05)
 - 0009: Password recovery by email (accepted for AUTH-06)
 - 0010: Client IP resolution and trusted proxy boundaries (accepted for AUTH-07)
+- 0011: Scan the published image before promoting `latest` (accepted for AUTH-07b/S0.3b)
 
 Add a line here for every new ADR.

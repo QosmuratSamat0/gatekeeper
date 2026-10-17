@@ -595,3 +595,11 @@
 - Problems: `.ai/project.md` still described Auth as the current priority, so it was synchronized with `.ai/tasks/current.md`.
 - Next: User reviews the S0.3 plan; after approval, Gemini implements it and Codex reviews the workflow and verification evidence.
 - Commit: pending
+### 2026-10-17 - AUTH-07b/S0.3b - Review follow-ups and scan-then-promote CI
+- Done: Verification resend now fails closed (500) when the session checker is not wired, instead of skipping the session check. `LOGIN_RATE_LIMIT_WINDOW` and `REGISTER_RATE_LIMIT_WINDOW` errors no longer print `%!w(<nil>)`. README recommends a narrow trusted CIDR (k3s pod CIDR) and warns about overlap with client networks. CI pushes only `sha-<commit>`, scans the pushed digest for amd64 and arm64, then promotes `latest` and verifies it matches the scanned digest; trivy-action is pinned by SHA (v0.36.0); provenance and SBOM are explicit.
+- Files: `services/auth/internal/delivery/http/email_verification.go`, `email_verification_test.go`, `internal/platform/config/config.go`, `config_test.go`, `services/auth/README.md`, `.github/workflows/ci.yml`, `docs/adr/0011-scan-then-promote-image-publishing.md`, `.ai/decisions.md`, `.ai/tasks/current.md`.
+- Decisions: ADR 0011 (scan the exact published manifest before moving `latest`).
+- Problems: Existing handler tests relied on the fail-open path; the default test router now wires an active-session stub, and a new test covers fail-closed behavior.
+- Checks: `go vet ./...`, `go test ./...`, gofmt (LF-normalized), golangci-lint v2.14.0 (Docker, 0 issues), `git diff --check`, workflow YAML parse. Integration tests and `-race` run in CI only (no local PostgreSQL / CGO).
+- Next: Push the branch, open a PR, confirm CI; after merge, verify the publish job scans both platforms and promotes `latest`. Then S0.4.
+- Commit: pending

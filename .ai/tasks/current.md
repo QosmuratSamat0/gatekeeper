@@ -141,9 +141,10 @@ Deliverables:
 - S0.2: auth service skeleton, tests, Dockerfile, CI workflow
 - AUTH-01 through AUTH-06
 - S0.3: GHCR publishing workflow and documentation
-- AUTH-07: abuse hardening before deployment (branch `feat/auth-07-hardening`)
+- AUTH-07: abuse hardening before deployment (merged in PR #1, `61e2290`)
+- AUTH-07b/S0.3b: review follow-ups and CI scan-then-promote (branch `fix/auth-07b-ci-hardening`)
 
-## Next (after AUTH-07)
+## Next (after AUTH-07b/S0.3b)
 - [ ] S0.4 k3s on Oracle Cloud + Argo CD
 - [ ] S0.5 Prometheus/Grafana + k6 baseline
 

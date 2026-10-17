@@ -53,33 +53,31 @@ func (h *Handler) RequestEmailVerification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Verify that caller session remains active, not revoked, and not expired, matching /v1/auth/me.
-	if h.currentAccountUC != nil {
-		_, err := h.currentAccountUC.Execute(r.Context(), identity.AccountID, identity.SessionID)
-		if err != nil {
-			switch {
-			case errors.Is(err, domain.ErrSessionNotFound),
-				errors.Is(err, domain.ErrSessionRevoked),
-				errors.Is(err, domain.ErrSessionExpired),
-				errors.Is(err, domain.ErrInvalidCredentials):
-				writeError(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized")
-			case errors.Is(err, context.Canceled), errors.Is(r.Context().Err(), context.Canceled):
-				return
-			case errors.Is(err, domain.ErrDatabaseUnavailable),
-				errors.Is(err, context.DeadlineExceeded),
-				errors.Is(r.Context().Err(), context.DeadlineExceeded):
-				h.logSafeError("database_unavailable", r)
-				writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "Service temporarily unavailable, please retry")
-			default:
-				h.logSafeError("system_internal_failure", r)
-				writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error")
-			}
-			return
-		}
+	// Fail closed if either dependency is missing: the session check must never be skipped silently.
+	if h.currentAccountUC == nil || h.emailVerificationReqUC == nil {
+		writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error")
+		return
 	}
 
-	if h.emailVerificationReqUC == nil {
-		writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error")
+	// Verify that caller session remains active, not revoked, and not expired, matching /v1/auth/me.
+	if _, err := h.currentAccountUC.Execute(r.Context(), identity.AccountID, identity.SessionID); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrSessionNotFound),
+			errors.Is(err, domain.ErrSessionRevoked),
+			errors.Is(err, domain.ErrSessionExpired),
+			errors.Is(err, domain.ErrInvalidCredentials):
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized")
+		case errors.Is(err, context.Canceled), errors.Is(r.Context().Err(), context.Canceled):
+			return
+		case errors.Is(err, domain.ErrDatabaseUnavailable),
+			errors.Is(err, context.DeadlineExceeded),
+			errors.Is(r.Context().Err(), context.DeadlineExceeded):
+			h.logSafeError("database_unavailable", r)
+			writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "Service temporarily unavailable, please retry")
+		default:
+			h.logSafeError("system_internal_failure", r)
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error")
+		}
 		return
 	}
 
