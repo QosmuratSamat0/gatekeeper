@@ -602,4 +602,4 @@
 - Problems: Existing handler tests relied on the fail-open path; the default test router now wires an active-session stub, and a new test covers fail-closed behavior.
 - Checks: `go vet ./...`, `go test ./...`, gofmt (LF-normalized), golangci-lint v2.14.0 (Docker, 0 issues), `git diff --check`, workflow YAML parse. Integration tests and `-race` run in CI only (no local PostgreSQL / CGO).
 - Next: Push the branch, open a PR, confirm CI; after merge, verify the publish job scans both platforms and promotes `latest`. Then S0.4.
-- Commit: pending
+- Commit: 196d336

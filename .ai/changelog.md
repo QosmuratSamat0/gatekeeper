@@ -22,3 +22,4 @@
 - <hash> <date> <message> - <what changed in architecture/behavior>
 - 86a6228 2026-09-29 docs: approve chi router, update step S0.2 - Approved chi router (ADR 0002) and updated S0.2 task definition
 - a7fa38b 2026-09-29 feat(auth): implement service skeleton, health endpoints, and CI - Added chi router, /healthz and /readyz, slog JSON logging, graceful shutdown, unit tests, distroless Dockerfile, and GitHub Actions CI workflow
+- 196d336 2026-10-17 fix(auth,ci): fail closed on verification resend, scan published image before latest - Verification resend fails closed without session checker; rate-limit window config errors fixed; CI scans pushed amd64/arm64 digest before promoting latest (ADR 0011).
