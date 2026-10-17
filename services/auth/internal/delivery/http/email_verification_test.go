@@ -54,7 +54,13 @@ func setupEmailVerificationTestRouter(
 	verifier authmiddleware.TokenVerifier,
 	limiter *authmiddleware.IPRateLimiter,
 ) http.Handler {
-	return setupEmailVerificationTestRouterWithAccount(reqUC, confUC, nil, verifier, limiter)
+	// Default to an active caller session; session-rejection cases use the WithAccount variant.
+	activeSession := &mockCurrentAccountService{
+		executeFn: func(ctx context.Context, accountID, sessionID string) (domain.Account, error) {
+			return domain.Account{ID: accountID, Status: domain.AccountStatusActive}, nil
+		},
+	}
+	return setupEmailVerificationTestRouterWithAccount(reqUC, confUC, activeSession, verifier, limiter)
 }
 
 func setupEmailVerificationTestRouterWithAccount(
@@ -310,6 +316,30 @@ func TestEmailVerificationHandler_Request(t *testing.T) {
 			if reqInvoked {
 				t.Fatalf("expected reqUC not called for %v", errSession)
 			}
+		}
+	})
+
+	t.Run("missing session checker fails closed with 500 and does not send email", func(t *testing.T) {
+		var reqInvoked bool
+		mockReq := &mockEmailVerificationReqService{
+			requestFn: func(ctx context.Context, accountID string) error {
+				reqInvoked = true
+				return nil
+			},
+		}
+		router := setupEmailVerificationTestRouterWithAccount(mockReq, nil, nil, mockVerifier, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/email/verification/request", nil)
+		req.Header.Set("Authorization", "Bearer valid-token")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 Internal Server Error without session checker, got %d", rec.Code)
+		}
+		if reqInvoked {
+			t.Fatal("expected email verification request usecase never to be called without session checker")
 		}
 	})
 

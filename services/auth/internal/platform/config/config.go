@@ -150,7 +150,7 @@ func Load() (Config, error) {
 	if val := os.Getenv("LOGIN_RATE_LIMIT_WINDOW"); val != "" {
 		d, err := time.ParseDuration(val)
 		if err != nil || d <= 0 {
-			return Config{}, fmt.Errorf("invalid LOGIN_RATE_LIMIT_WINDOW: %w", err)
+			return Config{}, fmt.Errorf("invalid LOGIN_RATE_LIMIT_WINDOW: must be a positive duration, got %q", val)
 		}
 		rateLimitWindow = d
 	}
@@ -168,7 +168,7 @@ func Load() (Config, error) {
 	if val := os.Getenv("REGISTER_RATE_LIMIT_WINDOW"); val != "" {
 		d, err := time.ParseDuration(val)
 		if err != nil || d <= 0 {
-			return Config{}, fmt.Errorf("invalid REGISTER_RATE_LIMIT_WINDOW: %w", err)
+			return Config{}, fmt.Errorf("invalid REGISTER_RATE_LIMIT_WINDOW: must be a positive duration, got %q", val)
 		}
 		regRateLimitWindow = d
 	}

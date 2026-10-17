@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,8 @@ func TestConfigLoad(t *testing.T) {
 		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "0s")
 		if _, err := config.Load(); err == nil {
 			t.Error("expected error for non-positive REGISTER_RATE_LIMIT_WINDOW")
+		} else if strings.Contains(err.Error(), "%!") {
+			t.Errorf("expected well-formed error message, got %q", err.Error())
 		}
 
 		t.Setenv("REGISTER_RATE_LIMIT_WINDOW", "-10s")

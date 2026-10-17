@@ -69,7 +69,7 @@ jobs:
         run: docker build -t gatekeeper-auth:ci services/auth
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (Trivy v0.70.0)
         with:
           image-ref: 'gatekeeper-auth:ci'
           format: 'table'
@@ -104,6 +104,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Push only the immutable commit tag first. `latest` moves only after the
+      # exact published manifest passes the Trivy gate for every platform.
       - name: Build and push multi-arch image
         id: build
         uses: docker/build-push-action@v6
@@ -111,9 +113,42 @@ jobs:
           context: services/auth
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: true
+          sbom: true
           tags: |
             ghcr.io/qosmuratsamat0/gatekeeper-auth:sha-${{ github.sha }}
-            ghcr.io/qosmuratsamat0/gatekeeper-auth:latest
+
+      - name: Scan published image (linux/amd64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (Trivy v0.70.0)
+        env:
+          TRIVY_PLATFORM: linux/amd64
+          TRIVY_IMAGE_SRC: remote
+        with:
+          image-ref: ghcr.io/qosmuratsamat0/gatekeeper-auth@${{ steps.build.outputs.digest }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Scan published image (linux/arm64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (Trivy v0.70.0)
+        env:
+          TRIVY_PLATFORM: linux/arm64
+          TRIVY_IMAGE_SRC: remote
+        with:
+          image-ref: ghcr.io/qosmuratsamat0/gatekeeper-auth@${{ steps.build.outputs.digest }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Promote scanned digest to latest
+        env:
+          IMAGE_LATEST: ghcr.io/qosmuratsamat0/gatekeeper-auth:latest
+          IMAGE_DIGEST_REF: ghcr.io/qosmuratsamat0/gatekeeper-auth@${{ steps.build.outputs.digest }}
+        run: docker buildx imagetools create --tag "${IMAGE_LATEST}" "${IMAGE_DIGEST_REF}"
 
       - name: Verify image pull and multi-arch manifest
         env:
@@ -127,22 +162,25 @@ jobs:
           docker pull "${IMAGE_TAG}"
           echo "Pulling published image by digest reference: ${IMAGE_DIGEST_REF}"
           docker pull "${IMAGE_DIGEST_REF}"
-          echo "Inspecting manifest for supported platforms (by commit tag)..."
-          MANIFEST_TAG=$(docker buildx imagetools inspect "${IMAGE_TAG}")
-          echo "${MANIFEST_TAG}"
-          echo "${MANIFEST_TAG}" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in tag manifest"; exit 1; }
-          echo "${MANIFEST_TAG}" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in tag manifest"; exit 1; }
-          echo "Inspecting manifest for supported platforms (by digest)..."
-          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE_DIGEST_REF}")
-          echo "${MANIFEST_DIGEST}"
-          echo "${MANIFEST_DIGEST}" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in digest manifest"; exit 1; }
-          echo "${MANIFEST_DIGEST}" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in digest manifest"; exit 1; }
-          echo "Manifest multi-architecture verification passed."
+          for REF in "${IMAGE_TAG}" "${IMAGE_DIGEST_REF}"; do
+            echo "Inspecting manifest for supported platforms: ${REF}"
+            MANIFEST=$(docker buildx imagetools inspect "${REF}")
+            echo "${MANIFEST}"
+            echo "${MANIFEST}" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in ${REF}"; exit 1; }
+            echo "${MANIFEST}" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in ${REF}"; exit 1; }
+          done
+          LATEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE_LATEST}" | awk '/^Digest:/ {print $2; exit}')
+          if [ "${LATEST_DIGEST}" != "${DIGEST}" ]; then
+            echo "latest points to ${LATEST_DIGEST}, expected scanned digest ${DIGEST}"
+            exit 1
+          fi
+          echo "Manifest multi-architecture verification passed; latest matches the scanned digest."
           {
             echo "### Published Auth Container Image"
             echo "- **Image Name:** \`${IMAGE_NAME}\`"
             echo "- **Commit Tag:** \`${IMAGE_TAG}\`"
-            echo "- **Latest Tag:** \`${IMAGE_LATEST}\`"
+            echo "- **Latest Tag:** \`${IMAGE_LATEST}\` (promoted after Trivy scan of amd64 and arm64)"
             echo "- **Digest Reference:** \`${IMAGE_DIGEST_REF}\`"
             echo "- **Digest:** \`${DIGEST}\`"
+            echo "- **Attestations:** SLSA provenance and SBOM attached by Buildx"
           } >> "$GITHUB_STEP_SUMMARY"

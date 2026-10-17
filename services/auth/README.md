@@ -50,7 +50,7 @@ The `auth` service handles identity registration and credential persistence for 
 | `LOGIN_RATE_LIMIT_WINDOW` | `1m` | Window duration for IP rate limiting |
 | `REGISTER_RATE_LIMIT_ATTEMPTS` | `5` | Maximum registration attempts per IP per window (1-1000) |
 | `REGISTER_RATE_LIMIT_WINDOW` | `1m` | Window duration for registration IP rate limiting |
-| `TRUSTED_PROXY_CIDRS` | `""` | Comma-separated list of trusted proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). **Security warning:** Set only to trusted reverse proxies/ingress networks; never client networks. When empty, `X-Forwarded-For` is ignored. |
+| `TRUSTED_PROXY_CIDRS` | `""` | Comma-separated list of trusted proxy CIDRs, as narrow as possible (e.g. the k3s pod CIDR `10.42.0.0/16`). **Security warning:** Set only to the ingress/proxy network. A client inside a trusted range can spoof `X-Forwarded-For`, so the range must not overlap client networks. When empty, `X-Forwarded-For` is ignored. |
 | `PASSWORD_RESET_TOKEN_TTL` | `30m` | Password reset token lifetime (5m to 24h) |
 | `PASSWORD_RESET_COOLDOWN` | `60s` | Cooldown between password reset requests for an account (10s to 10m) |
 | `PASSWORD_RESET_QUEUE_DRAIN_TIMEOUT` | `45s` | Graceful shutdown drain timeout for in-process email delivery queue |
@@ -136,7 +136,8 @@ Multi-architecture images (`linux/amd64`, `linux/arm64`) are automatically built
 - **Registry Image**: `ghcr.io/qosmuratsamat0/gatekeeper-auth`
 - **Tags & References**:
   - `sha-<commit>`: Commit-specific tag matching the exact Git commit SHA (identifies source).
-  - `latest`: Rolling tag pointing to the most recent successful build on `main`.
+  - `latest`: Rolling tag pointing to the most recent build on `main` whose published manifest passed the Trivy scan for both `linux/amd64` and `linux/arm64`. A `sha-<commit>` tag can exist without `latest` moving if that scan fails.
+  - Each image carries Buildx SLSA provenance and an SBOM attestation.
   - `ghcr.io/qosmuratsamat0/gatekeeper-auth@sha256:...`: Published manifest digest reference (recommended for strict immutable deployments and GitOps / Argo CD).
 
 ### Pulling and Running the Image
